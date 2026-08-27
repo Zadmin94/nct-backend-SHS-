@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 로깅 3종 구조 1) LoggingFilter : traceId/clientIp 를 MDC 에 주입 (최전선) 2) LogInterceptor 
+	: 요청 URI/메서드/사용자/본문 상세 로그 3) logback(이 파일) : 출력 패턴/파일 롤링 정책 패턴의 %X{traceId} 
+	: LoggingFilter 가 MDC 에 넣은 요청 추적 ID -->
+<configuration>
+	<!--
+		운영 환경은 app.logging.dir 미지정 시 기존 경로를 유지한다.
+		로컬 프로필에서는 application-local.properties의 상대 경로를 사용한다.
+	-->
+	<springProperty scope="context"
+		name="LOG_DIR"
+		source="app.logging.dir"
+		defaultValue="/home/nct/logs" />
+	<property name="LOG_PATH_NAME" value="${LOG_DIR}/application.log" />
+	<property name="PATTERN" value="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n" />
+
+	<!-- 콘솔 -->
+	<appender name="STDOUT"
+		class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<pattern>${PATTERN}</pattern>
+		</encoder>
+	</appender>
+
+	<!-- SQL 로그 전용 콘솔 (줄바꿈 들여쓰기) -->
+	<appender name="QSTDOUT" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<pattern>%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} %n\t%msg%n</pattern>
+		</encoder>
+	</appender>
+
+	<!-- 파일 롤링 : 일자별 + 10MB 단위 분할, 30일 보관 -->
+	<appender name="ROLLING_FILE"
+		class="ch.qos.logback.core.rolling.RollingFileAppender">
+		<file>${LOG_PATH_NAME}</file>
+		<encoder
+			class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+			<pattern>${PATTERN}</pattern>
+		</encoder>
+		<rollingPolicy
+			class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+			<fileNamePattern>${LOG_DIR}/application_%d{yyyy-MM-dd}_%i.log
+			</fileNamePattern>
+			<timeBasedFileNamingAndTriggeringPolicy
+				class="ch.qos.logback.core.rolling.SizeAndTimeBasedFileNamingAndTriggeringPolicy">
+				<maxFileSize>10MB</maxFileSize>
+			</timeBasedFileNamingAndTriggeringPolicy>
+			<maxHistory>30</maxHistory>
+		</rollingPolicy>
+	</appender>
+
+	<!-- 프로젝트 패키지 로그 -->
+	<logger name="nct" level="INFO" additivity="false">
+		<appender-ref ref="STDOUT" />
+		<appender-ref ref="ROLLING_FILE" />
+	</logger>
+
+	<!-- log4jdbc : SQL + 실행시간만 출력 -->
+	<logger name="jdbc" level="OFF" additivity="false">
+		<appender-ref ref="STDOUT" />
+	</logger>
+	<!--
+		F-OPS-012: SQL 실행문에 실제 이메일·전화번호·계좌번호 값이 함께 출력될 수 있으므로 끈다.
+		개발 중 쿼리 확인이 필요해도 개인정보가 없는 로컬 환경에서만 일시적으로 켜야 한다.
+	-->
+	<logger name="jdbc.sqltiming" level="INFO" additivity="false">
+		<appender-ref ref="QSTDOUT" />
+	</logger>
+	<logger name="jdbc.connection" level="OFF" additivity="false">
+		<appender-ref ref="STDOUT" />
+	</logger>
+	<logger name="jdbc.sqlonly" level="OFF" additivity="false">
+		<appender-ref ref="STDOUT" />
+	</logger>
+	<logger name="jdbc.audit" level="OFF" additivity="false">
+		<appender-ref ref="STDOUT" />
+	</logger>
+	<logger name="jdbc.resultset" level="OFF" additivity="false">
+		<appender-ref ref="STDOUT" />
+	</logger>
+	<logger name="jdbc.resultsettable" level="OFF" additivity="false">
+		<appender-ref ref="STDOUT" />
+	</logger>
+
+	<root level="ERROR">
+		<appender-ref ref="STDOUT" />
+		<appender-ref ref="ROLLING_FILE" />
+	</root>
+</configuration>

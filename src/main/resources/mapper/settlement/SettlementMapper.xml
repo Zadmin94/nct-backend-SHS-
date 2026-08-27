@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="nct.settlement.mapper.SettlementMapper">
+
+    <!-- 정산 행 추가. REG_DT/UPDT_DT 등 시스템 컬럼은 DB DEFAULT에 맡기고 생략 -->
+    <insert id="insert" parameterType="nct.settlement.domain.Settlement"
+            useGeneratedKeys="true" keyProperty="stlmSn">
+        /* 정산: 행 추가 (대기 상태) */
+        INSERT INTO SETTLEMENT (TRD_SN, USR_SN, STLM_AMT, STLM_STATUS_CD)
+        VALUES (#{trdSn}, #{usrSn}, #{stlmAmt}, #{stlmStatusCd})
+    </insert>
+
+    <!-- 행 잠금 후 조회: 상태 검증~갱신 사이에 다른 트랜잭션이 끼어들지 못하게 한다.
+         컬럼 별칭(AS)을 직접 명시하는 이유: 전역 map-underscore-to-camel-case 설정은
+         git에 안 올라가는 application.properties 소속이라 PC마다 있거나 없어서,
+         설정이 없는 환경에서는 컬럼이 하나도 매핑되지 않아 조회 결과가 null로 떨어진다.
+         별칭을 박아두면 어떤 환경에서든 동일하게 동작한다 (알림·포인트 매퍼와 같은 방침) -->
+    <select id="selectForUpdate" resultType="nct.settlement.domain.Settlement">
+        /* 정산: 행 잠금 조회 (상태 전이 검증용) */
+        SELECT STLM_SN        AS stlmSn,
+               TRD_SN         AS trdSn,
+               USR_SN         AS usrSn,
+               STLM_AMT       AS stlmAmt,
+               STLM_STATUS_CD AS stlmStatusCd,
+               STLM_REG_DT    AS stlmRegDt,
+               STLM_UPDT_DT   AS stlmUpdtDt
+        FROM SETTLEMENT
+        WHERE STLM_SN = #{stlmSn}
+        FOR UPDATE
+    </select>
+
+    <select id="selectByTrade" resultType="nct.settlement.domain.Settlement">
+        /* 정산: 거래번호 기준 단건 조회 */
+        SELECT STLM_SN        AS stlmSn,
+               TRD_SN         AS trdSn,
+               USR_SN         AS usrSn,
+               STLM_AMT       AS stlmAmt,
+               STLM_STATUS_CD AS stlmStatusCd,
+               STLM_REG_DT    AS stlmRegDt,
+               STLM_UPDT_DT   AS stlmUpdtDt
+        FROM SETTLEMENT
+        WHERE TRD_SN = #{trdSn}
+    </select>
+
+    <select id="selectByTradeForUpdate" resultType="nct.settlement.domain.Settlement">
+        /* 정산: 거래번호 기준 잠금 조회 */
+        SELECT STLM_SN        AS stlmSn,
+               TRD_SN         AS trdSn,
+               USR_SN         AS usrSn,
+               STLM_AMT       AS stlmAmt,
+               STLM_STATUS_CD AS stlmStatusCd,
+               STLM_REG_DT    AS stlmRegDt,
+               STLM_UPDT_DT   AS stlmUpdtDt
+        FROM SETTLEMENT
+        WHERE TRD_SN = #{trdSn}
+        FOR UPDATE
+    </select>
+
+    <!-- 담당자 7 · F-OPS-021: 운영 통합상태용 거래별 정산 원본 상태 배치 조회 -->
+    <select id="findAdminSummariesByTradeIds" resultType="nct.settlement.dto.AdminSettlementSummary">
+        SELECT settlement.TRD_SN AS tradeId,
+               settlement.STLM_SN AS settlementId,
+               settlement.STLM_STATUS_CD AS statusCode,
+               statusCode.CMM_NM AS statusName
+          FROM SETTLEMENT settlement
+          LEFT JOIN CMM_CODE statusCode
+            ON statusCode.CMM_CD = settlement.STLM_STATUS_CD
+         WHERE settlement.TRD_SN IN
+        <foreach collection="tradeIds" item="tradeId" open="(" separator="," close=")">
+            #{tradeId}
+        </foreach>
+    </select>
+
+    <select id="selectLongHeldSettlements" resultType="nct.ops.risk.port.SettlementRiskCandidate">
+        /* 담당자 7 연계 · REQ-OPS-011: 장기 보류 정산 위험 후보 */
+        SELECT STLM_SN AS settlementSn,
+               TRD_SN AS tradeSn,
+               STLM_UPDT_DT AS holdStartedAt
+         FROM SETTLEMENT
+         WHERE STLM_STATUS_CD = 'STLC0002'
+           AND STLM_UPDT_DT &lt; #{cutoff}
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM RISK_EVENT risk
+                WHERE risk.RSK_EVT_TYPE_CD = 'RSKC0006'
+                  AND risk.RSK_EVT_REF_TYPE_CD = 'REFC0017'
+                  AND risk.RSK_EVT_REF_SN = SETTLEMENT.STLM_SN
+                  AND risk.RSK_EVT_REG_DT &gt;= SETTLEMENT.STLM_UPDT_DT
+           )
+         ORDER BY STLM_UPDT_DT ASC, STLM_SN ASC
+         LIMIT #{limit}
+    </select>
+
+    <update id="updateStatus">
+        /* 정산: 상태코드 갱신 */
+        UPDATE SETTLEMENT
+        SET STLM_STATUS_CD = #{statusCd},
+            STLM_UPDT_ID = #{actorId},
+            STLM_UPDT_DT = NOW()
+        WHERE STLM_SN = #{stlmSn}
+    </update>
+
+    <select id="selectListByUser" resultType="nct.settlement.domain.Settlement">
+        /* 정산: 회원별 목록 (최신순 100건) */
+        SELECT S.STLM_SN        AS stlmSn,
+               S.TRD_SN         AS trdSn,
+               T.TRD_TYPE_CD    AS tradeTypeCode,
+               S.USR_SN         AS usrSn,
+               S.STLM_AMT       AS stlmAmt,
+               S.STLM_STATUS_CD AS stlmStatusCd,
+               S.STLM_REG_DT    AS stlmRegDt,
+               S.STLM_UPDT_DT   AS stlmUpdtDt
+        FROM SETTLEMENT S
+        LEFT JOIN TRADE T ON T.TRD_SN = S.TRD_SN
+        WHERE S.USR_SN = #{usrSn}
+        ORDER BY S.STLM_SN DESC
+        LIMIT 100
+    </select>
+
+    <sql id="adminSettlementColumns">
+        S.STLM_SN AS settlementId,
+        S.TRD_SN AS tradeId,
+        S.USR_SN AS userId,
+        U.USR_NM AS userName,
+        S.STLM_AMT AS amount,
+        S.STLM_STATUS_CD AS statusCode,
+        SC.CMM_NM AS statusName,
+        S.STLM_REG_DT AS registeredAt,
+        S.STLM_UPDT_DT AS updatedAt,
+        A.STLM_ADM_ACT_TYPE AS lastActionType,
+        A.STLM_ADM_ACT_RSN_CN AS processReason,
+        A.STLM_PROC_USR_SN AS processorUserId,
+        PU.USR_NM AS processorName,
+        A.STLM_ADM_ACT_REG_DT AS processedAt
+    </sql>
+
+    <sql id="adminSettlementJoins">
+        FROM SETTLEMENT S
+        JOIN USERS U ON U.USR_SN = S.USR_SN
+        LEFT JOIN CMM_CODE SC ON SC.CMM_CD = S.STLM_STATUS_CD
+        LEFT JOIN SETTLEMENT_ADMIN_ACTION A
+          ON A.STLM_ADM_ACT_SN = (
+              SELECT MAX(LA.STLM_ADM_ACT_SN)
+                FROM SETTLEMENT_ADMIN_ACTION LA
+               WHERE LA.STLM_SN = S.STLM_SN
+          )
+        LEFT JOIN USERS PU ON PU.USR_SN = A.STLM_PROC_USR_SN
+    </sql>
+
+    <sql id="adminSettlementFilters">
+        <where>
+            <if test="statusCode != null and statusCode != ''">
+                AND S.STLM_STATUS_CD = #{statusCode}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    CAST(S.STLM_SN AS CHAR) LIKE CONCAT('%', #{keyword}, '%')
+                    OR CAST(S.TRD_SN AS CHAR) LIKE CONCAT('%', #{keyword}, '%')
+                    OR CAST(S.USR_SN AS CHAR) LIKE CONCAT('%', #{keyword}, '%')
+                    OR U.USR_NM LIKE CONCAT('%', #{keyword}, '%')
+                )
+            </if>
+        </where>
+    </sql>
+
+    <select id="findAdminPage" resultType="nct.settlement.dto.AdminSettlementRecord">
+        SELECT <include refid="adminSettlementColumns" />
+        <include refid="adminSettlementJoins" />
+        <include refid="adminSettlementFilters" />
+        <!-- 담당자 7 · F-OPS-009: 자동 완료 흐름에서도 목록 순서가 흔들리지 않도록 정산번호 최신순으로 조회한다. -->
+        ORDER BY S.STLM_SN DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countAdminPage" resultType="long">
+        SELECT COUNT(*)
+        <include refid="adminSettlementJoins" />
+        <include refid="adminSettlementFilters" />
+    </select>
+
+    <select id="findAdminDetail" resultType="nct.settlement.dto.AdminSettlementRecord">
+        SELECT <include refid="adminSettlementColumns" />
+        <include refid="adminSettlementJoins" />
+        WHERE S.STLM_SN = #{stlmSn}
+    </select>
+
+    <select id="findAdminActionByRequestIdForUpdate"
+            resultType="nct.settlement.domain.SettlementAdminAction">
+        SELECT STLM_ADM_ACT_SN AS actionSn,
+               STLM_SN AS settlementSn,
+               STLM_ADM_ACT_TYPE AS actionType,
+               STLM_PREV_STATUS_CD AS previousStatusCode,
+               STLM_NEXT_STATUS_CD AS nextStatusCode,
+               STLM_ADM_ACT_RSN_CN AS reason,
+               STLM_ADM_REQ_ID AS requestId,
+               STLM_PROC_USR_SN AS processorUserSn,
+               STLM_ADM_ACT_REG_DT AS processedAt
+          FROM SETTLEMENT_ADMIN_ACTION
+         WHERE STLM_ADM_REQ_ID = #{requestId}
+         FOR UPDATE
+    </select>
+
+    <update id="updateStatusIfExpected">
+        UPDATE SETTLEMENT
+           SET STLM_STATUS_CD = #{nextStatusCd},
+               STLM_UPDT_ID = #{actorId},
+               STLM_UPDT_DT = CURRENT_TIMESTAMP
+         WHERE STLM_SN = #{stlmSn}
+           AND STLM_STATUS_CD = #{expectedStatusCd}
+    </update>
+
+    <insert id="insertAdminAction" parameterType="nct.settlement.domain.SettlementAdminAction"
+            useGeneratedKeys="true" keyProperty="actionSn">
+        INSERT INTO SETTLEMENT_ADMIN_ACTION (
+            STLM_SN,
+            STLM_ADM_ACT_TYPE,
+            STLM_PREV_STATUS_CD,
+            STLM_NEXT_STATUS_CD,
+            STLM_ADM_ACT_RSN_CN,
+            STLM_ADM_REQ_ID,
+            STLM_PROC_USR_SN
+        ) VALUES (
+            #{settlementSn},
+            #{actionType},
+            #{previousStatusCode},
+            #{nextStatusCode},
+            #{reason},
+            #{requestId},
+            #{processorUserSn}
+        )
+    </insert>
+
+</mapper>

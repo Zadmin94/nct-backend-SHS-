@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="nct.product.mapper.ProductMapper">
+
+    <!-- ── resultMap ───────────────────────────────────── -->
+    <resultMap id="ProductResponseMap" type="nct.product.dto.ProductResponse">
+        <id     property="prdSn"          column="PRD_SN"           />
+        <result property="usrSn"          column="USR_SN"           />
+        <result property="catSn"          column="CAT_SN"           />
+        <result property="catNm"          column="CAT_NM"           />
+        <result property="prdNm"          column="PRD_NM"           />
+        <result property="prdCn"          column="PRD_CN"           />
+        <result property="prdStatusCd"    column="PRD_STATUS_CD"    />
+        <result property="prdStartAmt"    column="PRD_START_AMT"    />
+        <result property="prdIbyAmt"      column="PRD_IBY_AMT"      />
+        <result property="prdTrdMethodCd" column="PRD_TRD_METHOD_CD"/>
+        <result property="prdUseYn"       column="PRD_USE_YN"       />
+        <result property="prdRegDt"       column="PRD_REG_DT"       />
+        <result property="prdUpdtDt"      column="PRD_UPDT_DT"      />
+        <result property="prdImgUrl"      column="PRD_IMG_URL"      /><!-- 담당자6, F-AUC-002 -->
+        <result property="prdDraftBidUnit" column="PRD_DRAFT_BID_UNIT" />
+        <result property="prdDraftStartDt" column="PRD_DRAFT_START_DT" />
+        <result property="prdDraftEndDt"   column="PRD_DRAFT_END_DT"   />
+        <result property="prdDraftStartNowYn"     column="PRD_DRAFT_START_NOW_YN"  />
+        <result property="prdDraftPolicyAgreedYn" column="PRD_DRAFT_POLICY_AGREED_YN" />
+    </resultMap>
+
+    <resultMap id="ProductEntityMap" type="nct.product.domain.Product">
+        <id     property="prdSn"          column="PRD_SN"           />
+        <result property="usrSn"          column="USR_SN"           />
+        <result property="catSn"          column="CAT_SN"           />
+        <result property="prdNm"          column="PRD_NM"           />
+        <result property="prdCn"          column="PRD_CN"           />
+        <result property="prdStatusCd"    column="PRD_STATUS_CD"    />
+        <result property="prdStartAmt"    column="PRD_START_AMT"    />
+        <result property="prdIbyAmt"      column="PRD_IBY_AMT"      />
+        <result property="prdTrdMethodCd" column="PRD_TRD_METHOD_CD"/>
+        <result property="prdUseYn"       column="PRD_USE_YN"       />
+        <result property="prdRegDt"       column="PRD_REG_DT"       />
+        <result property="prdUpdtDt"      column="PRD_UPDT_DT"      />
+        <result property="prdRegId"       column="PRD_REG_ID"       />
+        <result property="prdUpdtId"      column="PRD_UPDT_ID"      />
+        <result property="prdDraftBidUnit" column="PRD_DRAFT_BID_UNIT" />
+        <result property="prdDraftStartDt" column="PRD_DRAFT_START_DT" />
+        <result property="prdDraftEndDt"   column="PRD_DRAFT_END_DT"   />
+        <result property="prdDraftPolicyAgreedYn" column="PRD_DRAFT_POLICY_AGREED_YN" />
+    </resultMap>
+
+    <!-- ── 상품 등록 ─────────────────────────────────────── -->
+    <insert id="saveProduct" useGeneratedKeys="true" keyProperty="prdSn">
+        /* ProductMapper.saveProduct */
+        INSERT INTO PRODUCT
+            (USR_SN, CAT_SN, PRD_NM, PRD_CN, PRD_STATUS_CD,
+             PRD_START_AMT, PRD_IBY_AMT, PRD_TRD_METHOD_CD, PRD_USE_YN,
+             PRD_REG_ID, PRD_UPDT_ID,
+             PRD_DRAFT_BID_UNIT, PRD_DRAFT_START_DT, PRD_DRAFT_END_DT, PRD_DRAFT_START_NOW_YN, PRD_DRAFT_POLICY_AGREED_YN)
+        VALUES
+            (#{usrSn}, #{catSn}, #{prdNm}, #{prdCn}, #{prdStatusCd},
+             #{prdStartAmt}, #{prdIbyAmt}, #{prdTrdMethodCd}, 'Y',
+             #{prdRegId}, #{prdUpdtId},
+             #{prdDraftBidUnit}, #{prdDraftStartDt}, #{prdDraftEndDt}, #{prdDraftStartNowYn}, #{prdDraftPolicyAgreedYn})
+    </insert>
+
+    <!-- ── 상품 단건 조회 (카테고리명·대표이미지 JOIN) ──── -->
+    <select id="findProductById" resultMap="ProductResponseMap">
+        /* ProductMapper.findProductById */
+        SELECT p.PRD_SN, p.USR_SN, p.CAT_SN, c.CAT_NM,
+               p.PRD_NM, p.PRD_CN, p.PRD_STATUS_CD,
+               p.PRD_START_AMT, p.PRD_IBY_AMT, p.PRD_TRD_METHOD_CD, p.PRD_USE_YN,
+               p.PRD_REG_DT, p.PRD_UPDT_DT,
+               p.PRD_DRAFT_BID_UNIT, p.PRD_DRAFT_START_DT, p.PRD_DRAFT_END_DT, p.PRD_DRAFT_START_NOW_YN, p.PRD_DRAFT_POLICY_AGREED_YN,
+               f.FL_PATH AS PRD_IMG_URL
+          FROM PRODUCT p
+          JOIN CATEGORY c ON c.CAT_SN = p.CAT_SN
+          LEFT JOIN PRODUCT_IMAGE pi ON pi.PRD_SN = p.PRD_SN AND pi.PRD_IMG_RPRS_YN = 'Y'
+          LEFT JOIN FILES f ON f.FL_SN = pi.FL_SN
+         WHERE p.PRD_SN = #{prdSn}
+           AND p.PRD_USE_YN = 'Y'
+           AND p.PRD_STATUS_CD != 'PRDC0004'
+    </select>
+
+    <!-- 담당자 7 · F-OPS-003: 관리자 운영 화면은 숨김 상품도 확인해야 하며 삭제 상품은 제외합니다. -->
+    <select id="findProductForAdminById" resultMap="ProductResponseMap">
+        /* ProductMapper.findProductForAdminById */
+        SELECT p.PRD_SN, p.USR_SN, p.CAT_SN, c.CAT_NM,
+               p.PRD_NM, p.PRD_CN, p.PRD_STATUS_CD,
+               p.PRD_START_AMT, p.PRD_IBY_AMT, p.PRD_TRD_METHOD_CD, p.PRD_USE_YN,
+               p.PRD_REG_DT, p.PRD_UPDT_DT,
+               p.PRD_DRAFT_BID_UNIT, p.PRD_DRAFT_START_DT, p.PRD_DRAFT_END_DT,
+               p.PRD_DRAFT_START_NOW_YN, p.PRD_DRAFT_POLICY_AGREED_YN,
+               f.FL_PATH AS PRD_IMG_URL
+          FROM PRODUCT p
+          JOIN CATEGORY c ON c.CAT_SN = p.CAT_SN
+          LEFT JOIN PRODUCT_IMAGE pi
+            ON pi.PRD_SN = p.PRD_SN
+           AND pi.PRD_IMG_RPRS_YN = 'Y'
+          LEFT JOIN FILES f ON f.FL_SN = pi.FL_SN
+         WHERE p.PRD_SN = #{prdSn}
+           AND p.PRD_STATUS_CD != 'PRDC0004'
+    </select>
+
+    <!-- ── 내 판매 목록 (최신순) ─────────────────────────── -->
+    <!-- filterType: DRAFT(임시저장) | RESERVED(예약) | ACTIVE(경매중) | TRADING(거래중) | DISPUTE(보류/분쟁) | DONE(완료) | CANCELED(취소) | ENDED(종료/유찰) | null(전체) -->
+    <select id="findMyProducts" resultMap="ProductResponseMap">
+        /* ProductMapper.findMyProducts */
+        SELECT p.PRD_SN, p.USR_SN, p.CAT_SN, c.CAT_NM,
+               p.PRD_NM, p.PRD_CN, p.PRD_STATUS_CD,
+               p.PRD_START_AMT, p.PRD_IBY_AMT, p.PRD_TRD_METHOD_CD, p.PRD_USE_YN,
+               p.PRD_REG_DT, p.PRD_UPDT_DT,
+               p.PRD_DRAFT_BID_UNIT, p.PRD_DRAFT_START_DT, p.PRD_DRAFT_END_DT,
+               p.PRD_DRAFT_START_NOW_YN, p.PRD_DRAFT_POLICY_AGREED_YN,
+               f.FL_PATH AS PRD_IMG_URL
+          FROM PRODUCT p
+          JOIN CATEGORY c ON c.CAT_SN = p.CAT_SN
+          LEFT JOIN PRODUCT_IMAGE pi ON pi.PRD_SN = p.PRD_SN AND pi.PRD_IMG_RPRS_YN = 'Y'
+          LEFT JOIN FILES f ON f.FL_SN = pi.FL_SN
+          LEFT JOIN AUCTION a ON a.PRD_SN = p.PRD_SN
+          LEFT JOIN TRADE t ON t.PRD_SN = p.PRD_SN AND t.TRD_TYPE_CD = 'TRDC0001'
+         WHERE p.USR_SN = #{usrSn}
+           AND p.PRD_STATUS_CD != 'PRDC0004'
+           <choose>
+               <!-- 임시저장은 예약/즉시시작 여부와 무관하게 전부 이 탭이다 — 아직 서버에
+                    AUCTION이 만들어지지 않아 실제로 확정된 게 없는 초안일 뿐이기 때문. -->
+               <when test="filterType == 'DRAFT'">
+                   AND p.PRD_STATUS_CD = 'PRDC0001'
+               </when>
+               <!-- 예약 = 등록까지 완료해 실제 AUCTION이 만들어졌고 아직 시작 시각이 지나지 않은
+                    상품(AUCC0001)만. 시작 시각이 지나면 AuctionActivationScheduler가 AUCC0002로
+                    넘겨서 자동으로 "경매중"으로 이동한다. -->
+               <when test="filterType == 'RESERVED'">
+                   AND p.PRD_STATUS_CD = 'PRDC0002'
+                   AND a.AUC_STATUS_CD = 'AUCC0001'
+               </when>
+               <when test="filterType == 'ACTIVE'">
+                   AND p.PRD_STATUS_CD = 'PRDC0002'
+                   <!-- 담당자 7 · 임시 제재/관리자 일시중지는 종료가 아니라 재개 가능한 진행 건이다. -->
+                   AND a.AUC_STATUS_CD IN ('AUCC0002', 'AUCC0013', 'AUCC9001')
+               </when>
+               <when test="filterType == 'TRADING'">
+                   AND (t.TRD_STATUS_CD IN ('TRDC0003', 'TRDC0004', 'TRDC0005')
+                     OR (a.AUC_STATUS_CD = 'AUCC0003' AND t.TRD_SN IS NULL))
+               </when>
+               <!-- AUCC0006(취소요청)은 관리자 반려 시 경매가 요청 전 상태로 복귀하는 미확정 상태라
+                    확정 취소(AUCC0005)와 분리해 보류/분쟁으로 분류한다. -->
+               <when test="filterType == 'DISPUTE'">
+                   AND (t.TRD_STATUS_CD = 'TRDC0007' OR a.AUC_STATUS_CD = 'AUCC0006')
+               </when>
+               <when test="filterType == 'DONE'">
+                   AND t.TRD_STATUS_CD = 'TRDC0006'
+               </when>
+               <when test="filterType == 'CANCELED'">
+                   AND a.AUC_STATUS_CD = 'AUCC0005'
+               </when>
+               <when test="filterType == 'ENDED'">
+                   AND a.AUC_STATUS_CD = 'AUCC0004'
+               </when>
+               <when test="filterType == 'CLOSED'">
+                   AND (t.TRD_STATUS_CD = 'TRDC0006'
+                     OR a.AUC_STATUS_CD IN ('AUCC0004', 'AUCC0005'))
+               </when>
+           </choose>
+         ORDER BY p.PRD_UPDT_DT DESC
+    </select>
+
+    <!-- ── 내 판매 목록 필터 탭 개수 — findMyProducts의 filterType별 WHERE 조건을 CASE WHEN 집계로 한 번에 계산 ── -->
+    <select id="countMyProductsSummary" resultType="nct.product.dto.ProductSummaryResponse">
+        /* ProductMapper.countMyProductsSummary */
+        SELECT
+            COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN p.PRD_STATUS_CD = 'PRDC0001' THEN 1 ELSE 0 END), 0) AS draft,
+            COALESCE(SUM(CASE WHEN p.PRD_STATUS_CD = 'PRDC0002'
+                               AND a.AUC_STATUS_CD = 'AUCC0001' THEN 1 ELSE 0 END), 0) AS reserved,
+            COALESCE(SUM(CASE WHEN p.PRD_STATUS_CD = 'PRDC0002'
+                               AND a.AUC_STATUS_CD IN ('AUCC0002', 'AUCC0013', 'AUCC9001')
+                              THEN 1 ELSE 0 END), 0) AS active,
+            COALESCE(SUM(CASE WHEN t.TRD_STATUS_CD IN ('TRDC0003', 'TRDC0004', 'TRDC0005')
+                               OR (a.AUC_STATUS_CD = 'AUCC0003' AND t.TRD_SN IS NULL) THEN 1 ELSE 0 END), 0) AS trading,
+            COALESCE(SUM(CASE WHEN t.TRD_STATUS_CD = 'TRDC0007'
+                               OR a.AUC_STATUS_CD = 'AUCC0006' THEN 1 ELSE 0 END), 0) AS dispute,
+            COALESCE(SUM(CASE WHEN t.TRD_STATUS_CD = 'TRDC0006'
+                               OR a.AUC_STATUS_CD IN ('AUCC0004', 'AUCC0005') THEN 1 ELSE 0 END), 0) AS closed
+          FROM PRODUCT p
+          LEFT JOIN AUCTION a ON a.PRD_SN = p.PRD_SN
+          LEFT JOIN TRADE t ON t.PRD_SN = p.PRD_SN AND t.TRD_TYPE_CD = 'TRDC0001'
+         WHERE p.USR_SN = #{usrSn}
+           AND p.PRD_STATUS_CD != 'PRDC0004'
+    </select>
+
+    <!-- ── 상품 수정 (임시저장 → 등록 전환 포함) ──────────────── -->
+    <update id="updateProduct">
+        /* ProductMapper.updateProduct */
+        UPDATE PRODUCT
+           SET CAT_SN            = #{catSn},
+               PRD_NM            = #{prdNm},
+               PRD_CN            = #{prdCn},
+               PRD_STATUS_CD     = #{prdStatusCd},
+               PRD_START_AMT     = #{prdStartAmt},
+               PRD_IBY_AMT       = #{prdIbyAmt},
+               PRD_TRD_METHOD_CD = #{prdTrdMethodCd},
+               PRD_UPDT_ID       = #{prdUpdtId},
+               PRD_DRAFT_BID_UNIT = #{prdDraftBidUnit},
+               PRD_DRAFT_START_DT = #{prdDraftStartDt},
+               PRD_DRAFT_END_DT   = #{prdDraftEndDt},
+               PRD_DRAFT_START_NOW_YN = #{prdDraftStartNowYn},
+               PRD_DRAFT_POLICY_AGREED_YN = #{prdDraftPolicyAgreedYn}
+         WHERE PRD_SN    = #{prdSn}
+           AND USR_SN    = #{usrSn}
+           AND PRD_USE_YN = 'Y'
+    </update>
+
+    <!-- ── 소유자 확인용 엔티티 조회 ──────────────────────── -->
+    <select id="findProductEntityById" resultMap="ProductEntityMap">
+        /* ProductMapper.findProductEntityById */
+        SELECT PRD_SN, USR_SN, CAT_SN, PRD_NM, PRD_CN, PRD_STATUS_CD,
+               PRD_START_AMT, PRD_IBY_AMT, PRD_TRD_METHOD_CD, PRD_USE_YN,
+               PRD_REG_DT, PRD_UPDT_DT, PRD_REG_ID, PRD_UPDT_ID
+          FROM PRODUCT
+         WHERE PRD_SN = #{prdSn}
+    </select>
+
+    <!-- ── 활성 상품 조회수 조회 — 존재/비활성 판정 겸용 ─────────── -->
+    <select id="findActiveViewCount" resultType="java.lang.Long">
+        /* ProductMapper.findActiveViewCount */
+        SELECT PRD_VIEW_CNT
+          FROM PRODUCT
+         WHERE PRD_SN = #{prdSn}
+           AND PRD_USE_YN = 'Y'
+           AND PRD_STATUS_CD != 'PRDC0004'
+    </select>
+
+    <!-- ── 조회수 증가 ────────────────────────────────────────── -->
+    <update id="incrementViewCount">
+        /* ProductMapper.incrementViewCount */
+        UPDATE PRODUCT
+           SET PRD_VIEW_CNT = PRD_VIEW_CNT + 1
+         WHERE PRD_SN = #{prdSn}
+           AND PRD_USE_YN = 'Y'
+    </update>
+
+    <update id="updateProductVisibility">
+        /* 담당자 7 · F-OPS-003: 관리자 상품 숨김·복구 */
+        UPDATE PRODUCT
+           SET PRD_USE_YN = #{useYn},
+               PRD_UPDT_ID = #{actor},
+               PRD_UPDT_DT = CURRENT_TIMESTAMP
+         WHERE PRD_SN = #{prdSn}
+           AND PRD_STATUS_CD != 'PRDC0004'
+           AND PRD_USE_YN = #{expectedUseYn}
+    </update>
+
+    <!-- ── 논리 삭제 (PRD_STATUS_CD=PRDC0004, PRD_USE_YN=N) ─ -->
+    <update id="deleteProduct">
+        /* ProductMapper.deleteProduct */
+        UPDATE PRODUCT
+           SET PRD_USE_YN    = 'N',
+               PRD_STATUS_CD = 'PRDC0004',
+               PRD_UPDT_ID   = CAST(#{usrSn} AS CHAR)
+         WHERE PRD_SN = #{prdSn}
+           AND USR_SN = #{usrSn}
+    </update>
+
+    <!-- ── 상품 변경사항 알림 대상(입찰자 전원) 조회 — BID/AUCTION은 옥동민(5) 소유, 조회만(기존 합의된 방식) ─ -->
+    <select id="findAuctionBidderIds" resultType="java.lang.Long">
+        /* ProductMapper.findAuctionBidderIds */
+        SELECT DISTINCT b.USR_SN
+          FROM BID b
+          JOIN AUCTION a ON a.AUC_SN = b.AUC_SN
+         WHERE a.PRD_SN = #{prdSn}
+    </select>
+
+    <!-- ── 삭제 전 가드: 유찰(AUCC0004)·취소(AUCC0005)로 종결되지 않은 경매가 있으면 true — AUCTION은 조회만(기존 합의된 방식) ─ -->
+    <select id="existsBlockingAuction" resultType="boolean">
+        /* ProductMapper.existsBlockingAuction */
+        SELECT EXISTS (
+            SELECT 1 FROM AUCTION
+             WHERE PRD_SN = #{prdSn}
+               AND AUC_STATUS_CD NOT IN ('AUCC0004', 'AUCC0005')
+        )
+    </select>
+
+    <!-- ── 변경사항(F-AUC-007) 등록 가드용 경매 상태 조회 — AUCTION은 조회만(기존 합의된 방식) ─ -->
+    <select id="findAuctionStatus" resultType="java.lang.String">
+        /* ProductMapper.findAuctionStatus */
+        SELECT AUC_STATUS_CD
+          FROM AUCTION
+         WHERE PRD_SN = #{prdSn}
+    </select>
+
+    <!-- 구매자 문의는 준비·진행 중이고 실제 종료시각이 지나지 않은 경매에서만 허용 -->
+    <select id="isAuctionInquiryAvailable" resultType="boolean">
+        /* ProductMapper.isAuctionInquiryAvailable */
+        SELECT EXISTS (
+            SELECT 1
+              FROM AUCTION
+             WHERE PRD_SN = #{prdSn}
+               AND AUC_STATUS_CD IN ('AUCC0001', 'AUCC0002')
+               AND AUC_END_DT &gt; CURRENT_TIMESTAMP
+        )
+    </select>
+
+</mapper>

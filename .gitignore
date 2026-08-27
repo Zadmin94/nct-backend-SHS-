@@ -1,0 +1,57 @@
+HELP.md
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+application.properties
+
+### 업로드 파일 (nct.common.file.FileStorageService 로컬 저장 경로) ###
+/uploads/
+application-mail-local.properties
+
+# 로컬 검증 전용 프로파일 - 로컬 MySQL 접속정보라 저장소에 올리지 않음 (BJN, 2026-07-20)
+application-local.properties
+
+# 키 모음 파일 - 저장소에 올리지 않고 팀 공유폴더로 전달 (BJN, 2026-07-17)
+.env
+
+# 업로드된 이미지 실 파일 - app.upload.dir (BJN, 2026-07-17, F-AUC-002)
+/uploads/
+
+# 로컬 실행 로그
+/logs/
+
+.DS_Store

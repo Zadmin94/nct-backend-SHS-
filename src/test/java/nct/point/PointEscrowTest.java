@@ -1,0 +1,315 @@
+package nct.point;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
+
+import nct.common.domain.RefType;
+import nct.global.security.crypto.FieldCryptoService;
+import nct.notification.service.NotificationService;
+import nct.point.domain.PointBalance;
+import nct.point.exception.InsufficientPointException;
+import nct.point.exception.PointException;
+import nct.point.service.PointService;
+
+/**
+ * Claude Code 작성 (BJN, 2026-07-20)
+ *
+ * [테스트 - 보관금(에스크로) 계약] (F-SVC-013 보관금 생성 / F-SVC-015 정산가능 전환 / 분쟁 판정 환불)
+ *
+ * 담당자4·5가 2단계에서 호출할 계약을 선구현·선검증한다 (팀전달_보관금_환불계약_260720.md 참조).
+ *
+ * 공유 DB(NCTDB) 주의사항 (PointFlowTest와 동일):
+ * - @Transactional 테스트는 메소드 종료 시 전부 롤백되어 행을 남기지 않는다
+ * - 테스트 회원은 매 실행 nanoTime으로 유니크하게 생성되어 팀원 데이터와 충돌하지 않는다
+ * - ⚠️ POINT_LEDGER.PT_LDG_TYPE_CD에 CMM_CODE FK가 걸려 있어, 실DB에 PTLC0013(환불) 코드가
+ *   등록되기 전에는 환불 관련 테스트가 FK 위반으로 실패한다 (팀전달_환불코드_정본요청_260720.md의
+ *   INSERT를 먼저 적용할 것 — PTLC0012 전환 코드 때와 같은 절차)
+ * - ⚠️ PTLC0014(수수료) 코드도 마찬가지 — 등록 전에는 수수료 차감 테스트가 FK 위반으로 실패한다
+ *   (팀전달_수수료코드_정본요청_260813.md 참조, 2026-08-13 수수료 도입)
+ */
+@SpringBootTest
+@Transactional
+class PointEscrowTest {
+
+    @Autowired PointService pointService;
+    @Autowired NotificationService notificationService;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired FieldCryptoService fieldCryptoService;
+
+    long requesterSn; // 서비스 의뢰자 (보관금을 내는 쪽)
+    long providerSn;  // 서비스 제공자 (정산대금을 받는 쪽)
+    long trdSn;       // 서비스 거래 (TRDC0002)
+
+    @BeforeEach
+    void setUp() {
+        requesterSn = insertUser("t_esc_req");
+        providerSn = insertUser("t_esc_prv");
+        // 의뢰자 사용가능 잔액 50,000P 직접 적재 (보관금 재원)
+        jdbc.update("""
+                INSERT INTO POINT_LEDGER (USR_SN, PT_LDG_PT_TYPE_CD, PT_LDG_TYPE_CD, PT_LDG_AMT, PT_LDG_BAL_AFTER_AMT, PT_LDG_RSN_CN)
+                VALUES (?, 'PTLC0001', 'PTLC0004', 50000, 50000, '테스트 충전')
+                """, requesterSn);
+        trdSn = insertServiceTrade();
+    }
+
+    // ---------- F-SVC-013 보관금 생성 ----------
+
+    @Test
+    @DisplayName("보관금 생성: 사용가능 −금액, 총 보유 감소(회원 버킷 밖으로 분리), 참조 기록 (F-SVC-013)")
+    void debitEscrow() {
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+
+        PointBalance bal = pointService.getBalance(requesterSn);
+        assertThat(bal.getAvailableAmt()).isEqualTo(20000);
+        assertThat(bal.getTotalAmt()).isEqualTo(20000); // 보관금은 회원 잔액 밖 (경매 보관금전환과 동일 의미)
+
+        // 원장에 보관금전환(PTLC0007) −행이 참조와 함께 남는다
+        Long amt = jdbc.queryForObject("""
+                SELECT SUM(PT_LDG_AMT) FROM POINT_LEDGER
+                WHERE USR_SN = ? AND PT_LDG_TYPE_CD = 'PTLC0007'
+                  AND PT_LDG_REF_TYPE_CD = ? AND PT_LDG_REF_SN = ?
+                """, Long.class, requesterSn, RefType.TRADE.getCode(), trdSn);
+        assertThat(amt).isEqualTo(-30000);
+    }
+
+    @Test
+    @DisplayName("보관금 생성: 사용가능 잔액을 넘는 금액은 거부되고 원장이 남지 않는다")
+    void debitEscrowInsufficient() {
+        assertThatThrownBy(() -> pointService.debitEscrow(requesterSn, 60000, RefType.TRADE, trdSn, "초과 보관금"))
+                .isInstanceOf(InsufficientPointException.class);
+
+        assertThat(pointService.getBalance(requesterSn).getAvailableAmt()).isEqualTo(50000);
+    }
+
+    @Test
+    @DisplayName("보관금 생성: 같은 거래에 두 번 결제하면 중복으로 거부된다 — 이중 결제 방지")
+    void debitEscrowDuplicate() {
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+
+        assertThatThrownBy(() -> pointService.debitEscrow(requesterSn, 10000, RefType.TRADE, trdSn, "중복 보관금"))
+                .isInstanceOf(PointException.class)
+                .hasMessageContaining("이미 보관금");
+
+        assertThat(pointService.getBalance(requesterSn).getAvailableAmt()).isEqualTo(20000); // 첫 결제만 반영
+    }
+
+    // ---------- F-SVC-015 정산가능 전환 ----------
+
+    @Test
+    @DisplayName("정산 전환: 제공자 정산가능 +보관금액(전액), 알림은 여기서 안 보냄 (F-SVC-015)")
+    void creditEscrowToSettleable() {
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+
+        long credited = pointService.creditEscrowToSettleable(providerSn, trdSn, RefType.TRADE, trdSn, "서비스 완료 정산");
+
+        assertThat(credited).isEqualTo(30000); // 금액은 호출자가 아니라 원장(보관금 잔존액)이 결정
+        assertThat(pointService.getBalance(providerSn).getSettleableAmt()).isEqualTo(30000);
+
+        // 적립은 전액(+) 기록 — 수수료는 SettlementService가 deductCommission으로 별도 −행을 남긴다
+        // (팀 합의 2026-08-13 수수료 도입 전의 "(수수료 0원)" 접미사는 제거됨)
+        String reason = jdbc.queryForObject("""
+                SELECT PT_LDG_RSN_CN FROM POINT_LEDGER
+                WHERE USR_SN = ? AND PT_LDG_TYPE_CD = 'PTLC0008'
+                """, String.class, providerSn);
+        assertThat(reason).isEqualTo("서비스 완료 정산");
+        // 정산 적립 알림은 수수료 계산까지 끝난 뒤 SettlementService가 발행한다 — 이 메서드
+        // 단독 호출로는 알림이 나가지 않는다 (2026-08-13, 총액·수수료·실수령액 병기 문구로 개선)
+        assertThat(notificationService.getUnreadCount(providerSn)).isZero();
+    }
+
+    @Test
+    @DisplayName("수수료 차감: 정산가능 버킷에 FEE(-) 원장 1행, 잔액은 net으로 감소 (팀 합의 2026-08-13)")
+    void deductCommissionRecordsFeeLedger() {
+        // ⚠️ 실DB CMM_CODE에 PTLC0014가 등록돼야 통과한다 (파일 상단 주의사항 참조)
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+        pointService.creditEscrowToSettleable(providerSn, trdSn, RefType.TRADE, trdSn, "서비스 완료 정산");
+
+        pointService.deductCommission(providerSn, 3000, RefType.TRADE, trdSn, "거래 수수료 차감 (서비스 10%)");
+
+        // 전액 적립(+30000) 후 수수료(−3000)가 짝으로 남아 잔액은 27,000P
+        assertThat(pointService.getBalance(providerSn).getSettleableAmt()).isEqualTo(27000);
+        Long feeAmt = jdbc.queryForObject("""
+                SELECT SUM(PT_LDG_AMT) FROM POINT_LEDGER
+                WHERE USR_SN = ? AND PT_LDG_TYPE_CD = 'PTLC0014'
+                  AND PT_LDG_REF_TYPE_CD = ? AND PT_LDG_REF_SN = ?
+                """, Long.class, providerSn, RefType.TRADE.getCode(), trdSn);
+        assertThat(feeAmt).isEqualTo(-3000);
+    }
+
+    @Test
+    @DisplayName("수수료 차감: 0원 이하 수수료는 원장 기록 없이 조용히 통과한다 — 소액 정산 반올림 케이스")
+    void deductCommissionSkipsZeroFee() {
+        pointService.deductCommission(providerSn, 0, RefType.TRADE, trdSn, "수수료 0원");
+
+        Integer feeRows = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM POINT_LEDGER
+                WHERE USR_SN = ? AND PT_LDG_TYPE_CD = 'PTLC0014'
+                """, Integer.class, providerSn);
+        assertThat(feeRows).isZero();
+    }
+
+    @Test
+    @DisplayName("정산 전환: 접수 중인 거래 신고가 있으면 차단된다")
+    void creditEscrowBlockedByDispute() {
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+        insertTradeReport(trdSn, "ABSC0001");
+
+        assertThatThrownBy(() -> pointService.creditEscrowToSettleable(providerSn, trdSn, RefType.TRADE, trdSn, "서비스 완료 정산"))
+                .isInstanceOf(PointException.class)
+                .hasMessageContaining("거래 문제");
+        assertThat(pointService.getBalance(providerSn).getSettleableAmt()).isZero();
+    }
+
+    @Test
+    @DisplayName("정산 전환: 처리 완료된 거래 신고는 막지 않는다")
+    void creditEscrowAllowedWhenDisputeResolved() {
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+        insertTradeReport(trdSn, "ABSC0003");
+
+        pointService.creditEscrowToSettleable(providerSn, trdSn, RefType.TRADE, trdSn, "서비스 완료 정산");
+
+        assertThat(pointService.getBalance(providerSn).getSettleableAmt()).isEqualTo(30000);
+    }
+
+    @Test
+    @DisplayName("정산 전환: 같은 거래로 두 번 전환하면 이중 정산으로 거부된다")
+    void creditEscrowTwiceBlocked() {
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+        pointService.creditEscrowToSettleable(providerSn, trdSn, RefType.TRADE, trdSn, "서비스 완료 정산");
+
+        assertThatThrownBy(() -> pointService.creditEscrowToSettleable(providerSn, trdSn, RefType.TRADE, trdSn, "중복 정산"))
+                .isInstanceOf(PointException.class)
+                .hasMessageContaining("이미 정산");
+
+        assertThat(pointService.getBalance(providerSn).getSettleableAmt()).isEqualTo(30000); // 1회분만
+    }
+
+    @Test
+    @DisplayName("정산 전환: 보관금이 없는 거래는 거부된다")
+    void creditEscrowWithoutEscrow() {
+        assertThatThrownBy(() -> pointService.creditEscrowToSettleable(providerSn, trdSn, RefType.TRADE, trdSn, "보관금 없는 정산"))
+                .isInstanceOf(PointException.class)
+                .hasMessageContaining("보관금이 없습니다");
+    }
+
+    // ---------- 분쟁 판정 환불 ----------
+
+    @Test
+    @DisplayName("환불: 판정 '환불' 시 의뢰자 사용가능 복원(전액) + 지갑 알림 — 물건·서비스 공통 계약")
+    void refundEscrow() {
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+
+        long refunded = pointService.refundEscrow(requesterSn, trdSn, RefType.TRADE, trdSn, "거래 문제 판정 환불");
+
+        assertThat(refunded).isEqualTo(30000);
+        PointBalance bal = pointService.getBalance(requesterSn);
+        assertThat(bal.getAvailableAmt()).isEqualTo(50000); // 원상복구
+        assertThat(bal.getTotalAmt()).isEqualTo(50000);
+        assertThat(notificationService.getList(requesterSn))
+                .anySatisfy(n -> assertThat(n.getNtfTtl()).isEqualTo("포인트 환불"));
+    }
+
+    @Test
+    @DisplayName("환불: 같은 건을 두 번 환불하면 거부된다 — 보관금·환불 합산 0이면 소멸로 판정")
+    void refundEscrowTwiceBlocked() {
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+        pointService.refundEscrow(requesterSn, trdSn, RefType.TRADE, trdSn, "거래 문제 판정 환불");
+
+        assertThatThrownBy(() -> pointService.refundEscrow(requesterSn, trdSn, RefType.TRADE, trdSn, "중복 환불"))
+                .isInstanceOf(PointException.class)
+                .hasMessageContaining("보관금이 없습니다");
+
+        assertThat(pointService.getBalance(requesterSn).getAvailableAmt()).isEqualTo(50000); // 1회분만
+    }
+
+    @Test
+    @DisplayName("순서 역전 방지: 정산 지급 후에는 환불 불가, 환불 후에는 정산 전환 불가")
+    void refundAndSettleAreMutuallyExclusive() {
+        // (1) 정산이 먼저 끝난 건은 환불할 수 없다 — 이미 제공자에게 지급된 돈 (관리자 수동 보정 영역)
+        pointService.debitEscrow(requesterSn, 30000, RefType.TRADE, trdSn, "견적 선택 보관금");
+        pointService.creditEscrowToSettleable(providerSn, trdSn, RefType.TRADE, trdSn, "서비스 완료 정산");
+        assertThatThrownBy(() -> pointService.refundEscrow(requesterSn, trdSn, RefType.TRADE, trdSn, "정산 후 환불 시도"))
+                .isInstanceOf(PointException.class)
+                .hasMessageContaining("정산 지급이 끝나");
+
+        // (2) 환불이 먼저 끝난 건은 정산 전환할 수 없다 — 보관금이 이미 소멸
+        long trdSn2 = insertServiceTrade();
+        pointService.debitEscrow(requesterSn, 10000, RefType.TRADE, trdSn2, "견적 선택 보관금");
+        pointService.refundEscrow(requesterSn, trdSn2, RefType.TRADE, trdSn2, "거래 문제 판정 환불");
+        assertThatThrownBy(() -> pointService.creditEscrowToSettleable(providerSn, trdSn2, RefType.TRADE, trdSn2, "환불 후 정산 시도"))
+                .isInstanceOf(PointException.class)
+                .hasMessageContaining("보관금이 없습니다");
+    }
+
+    // ---------- 픽스처 ----------
+
+    private long insertUser(String prefix) {
+        String loginId = prefix + "_" + System.nanoTime();
+        String email = loginId + "@test.local";
+        jdbc.update("""
+                INSERT INTO USERS (USR_LOGIN_ID, USR_PSWD_HASH, USR_NM, USR_EML_ENC, USR_EML_HMAC, USR_STATUS_CD, USR_ROLE_CD)
+                VALUES (?, '{noop}test', ?, ?, ?, 'USRC0001', 'ROLE_USER')
+                """, loginId, prefix, fieldCryptoService.encrypt(email), fieldCryptoService.emailHmac(email));
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    /**
+     * 서비스 거래(TRDC0002) 생성 — 정본 CHECK(CHK_TRADE_REF_COMBINATION)가 서비스 거래에
+     * 요청·견적 참조를 강제하므로 SERVICE_REQUEST → QUOTE → TRADE 순서로 만든다.
+     * 상태코드는 하드코딩 대신 그룹(SVCG01/QUTG01)의 첫 자식을 쓴다 (PointConvertTest의 TRDG03 방식)
+     */
+    private long insertServiceTrade() {
+        jdbc.update("""
+                INSERT INTO SERVICE_REQUEST (USR_SN, CAT_SN, SVC_REQ_TTL, SVC_REQ_STATUS_CD)
+                VALUES (?, 2, '보관금 테스트 요청',
+                        (SELECT C.CMM_CD FROM CMM_CODE C
+                         JOIN CMM_CODE P ON C.CMM_PARENT_SN = P.CMM_SN
+                         WHERE P.CMM_CD = 'SVCG01' ORDER BY C.CMM_SORT_NO LIMIT 1))
+                """, requesterSn);
+        long svcReqSn = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+
+        jdbc.update("""
+                INSERT INTO QUOTE (SVC_REQ_SN, USR_SN, QUT_AMT, QUT_STATUS_CD)
+                VALUES (?, ?, 30000,
+                        (SELECT C.CMM_CD FROM CMM_CODE C
+                         JOIN CMM_CODE P ON C.CMM_PARENT_SN = P.CMM_SN
+                         WHERE P.CMM_CD = 'QUTG01' ORDER BY C.CMM_SORT_NO LIMIT 1))
+                """, svcReqSn, providerSn);
+        long qutSn = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+
+        jdbc.update("""
+                INSERT INTO TRADE (TRD_TYPE_CD, TRD_STATUS_CD, TRD_AMT, REQ_USR_SN, PRV_USR_SN, SVC_REQ_SN, QUT_SN)
+                VALUES ('TRDC0002', 'TRDC0003', 30000, ?, ?, ?, ?)
+                """, requesterSn, providerSn, svcReqSn, qutSn);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    /** 담당자 7 · F-OPS-005: 서비스 거래에 새 통합 거래 신고 fixture를 연결합니다. */
+    private void insertTradeReport(long targetTrdSn, String statusCd) {
+        jdbc.update("""
+                INSERT INTO ABUSE_REPORT (
+                    RPRT_USR_SN, RPTD_USR_SN, ABR_TYPE_CD, ABR_STATUS_CD,
+                    ABR_REF_TYPE_CD, ABR_REF_SN, ABR_CN, ABR_REG_ID, ABR_UPDT_ID
+                ) VALUES (?, ?, 'ABRC0011', ?, 'REFC0005', ?,
+                          '정산 전환 차단 테스트용 거래 신고', ?, ?)
+                """, requesterSn, providerSn, statusCd, targetTrdSn,
+                String.valueOf(requesterSn), String.valueOf(requesterSn));
+        long reportSn = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+
+        jdbc.update("""
+                INSERT INTO ABUSE_REPORT_TRADE (
+                    ABR_SN, TRD_SN, ABR_TRD_PREV_STATUS_CD,
+                    ABR_TRD_REG_ID, ABR_TRD_UPDT_ID
+                ) VALUES (?, ?, 'TRDC0003', ?, ?)
+                """, reportSn, targetTrdSn,
+                String.valueOf(requesterSn), String.valueOf(requesterSn));
+    }
+}

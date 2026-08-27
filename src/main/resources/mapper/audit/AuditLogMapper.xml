@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- Claude Code 작성 (BJN, 2026-07-18) -->
+<mapper namespace="nct.audit.mapper.AuditLogMapper">
+
+    <!-- 감사로그 행 추가. REG_DT 등 시스템 컬럼은 DB DEFAULT에 맡기고 생략.
+         3년 보존 대상이므로 이 테이블에는 DELETE 쿼리를 만들지 않는다 (F-OPS-015 규칙) -->
+    <insert id="insert" parameterType="nct.audit.domain.AuditLog"
+            useGeneratedKeys="true" keyProperty="audLogSn">
+        /* 감사: 로그 기록 */
+        INSERT INTO AUDIT_LOG (USR_SN, AUD_LOG_TYPE_CD, AUD_LOG_REF_TYPE_CD, AUD_LOG_REF_SN,
+                               AUD_LOG_RSON_CN, AUD_LOG_BEFORE_CN, AUD_LOG_AFTER_CN,
+                               AUD_LOG_REQ_ID, AUD_LOG_REL_REF_TYPE_CD, AUD_LOG_REL_REF_SN,
+                               AUD_LOG_IP_ADDR)
+        VALUES (#{usrSn}, #{audLogTypeCd}, #{audLogRefTypeCd}, #{audLogRefSn},
+                #{audLogRsonCn}, #{audLogBeforeCn}, #{audLogAfterCn},
+                #{audLogReqId}, #{audLogRelRefTypeCd}, #{audLogRelRefSn},
+                #{audLogIpAddr})
+    </insert>
+
+    <!-- 조건별 목록: 코드값을 화면에 그대로 보여줄 수 없으니 CMM_CODE·USERS를 조인해 한글명을 함께 가져온다.
+         컬럼 별칭(AS)을 직접 명시하는 이유: 전역 map-underscore-to-camel-case 설정은 git에 안 올라가는
+         application.properties 소속이라 PC마다 있거나 없어서, 별칭을 박아둬야 어떤 환경에서든 동일하게 동작한다
+         (알림·포인트·정산 매퍼와 같은 방침) -->
+    <select id="selectList" resultType="nct.audit.domain.AuditLog">
+        /* 감사: 조건별 목록 (관리자 조회, 최신순) */
+        SELECT
+            A.AUD_LOG_SN          AS audLogSn,
+            A.USR_SN              AS usrSn,
+            U.USR_NM              AS usrNm,
+            A.AUD_LOG_TYPE_CD     AS audLogTypeCd,
+            T.CMM_NM              AS audLogTypeNm,
+            A.AUD_LOG_REF_TYPE_CD AS audLogRefTypeCd,
+            R.CMM_NM              AS refTypeNm,
+            A.AUD_LOG_REF_SN      AS audLogRefSn,
+            A.AUD_LOG_RSON_CN     AS audLogRsonCn,
+            A.AUD_LOG_BEFORE_CN   AS audLogBeforeCn,
+            A.AUD_LOG_AFTER_CN    AS audLogAfterCn,
+            A.AUD_LOG_REQ_ID      AS audLogReqId,
+            A.AUD_LOG_REL_REF_TYPE_CD AS audLogRelRefTypeCd,
+            RR.CMM_NM             AS relRefTypeNm,
+            A.AUD_LOG_REL_REF_SN  AS audLogRelRefSn,
+            A.AUD_LOG_IP_ADDR     AS audLogIpAddr,
+            A.AUD_LOG_REG_DT      AS audLogRegDt
+        FROM AUDIT_LOG A
+        JOIN CMM_CODE T ON T.CMM_CD = A.AUD_LOG_TYPE_CD
+        LEFT JOIN CMM_CODE R ON R.CMM_CD = A.AUD_LOG_REF_TYPE_CD
+        LEFT JOIN CMM_CODE RR ON RR.CMM_CD = A.AUD_LOG_REL_REF_TYPE_CD
+        LEFT JOIN USERS U ON U.USR_SN = A.USR_SN
+        <where>
+            <if test="usrSn != null">AND A.USR_SN = #{usrSn}</if>
+            <if test="audLogTypeCd != null and audLogTypeCd != ''">AND A.AUD_LOG_TYPE_CD = #{audLogTypeCd}</if>
+            <if test="fromDt != null">AND A.AUD_LOG_REG_DT &gt;= #{fromDt}</if>
+            <if test="toDt != null">AND A.AUD_LOG_REG_DT &lt;= #{toDt}</if>
+        </where>
+        ORDER BY A.AUD_LOG_SN DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectLatestByReference" resultType="nct.audit.domain.AuditLog">
+        SELECT A.AUD_LOG_SN          AS audLogSn,
+               A.USR_SN              AS usrSn,
+               A.AUD_LOG_TYPE_CD     AS audLogTypeCd,
+               A.AUD_LOG_REF_TYPE_CD AS audLogRefTypeCd,
+               A.AUD_LOG_REF_SN      AS audLogRefSn,
+               A.AUD_LOG_RSON_CN     AS audLogRsonCn,
+               A.AUD_LOG_BEFORE_CN   AS audLogBeforeCn,
+               A.AUD_LOG_AFTER_CN    AS audLogAfterCn,
+               A.AUD_LOG_REQ_ID      AS audLogReqId,
+               A.AUD_LOG_REL_REF_TYPE_CD AS audLogRelRefTypeCd,
+               A.AUD_LOG_REL_REF_SN  AS audLogRelRefSn,
+               A.AUD_LOG_REG_DT      AS audLogRegDt
+          FROM AUDIT_LOG A
+         WHERE A.AUD_LOG_REF_TYPE_CD = #{refTypeCd}
+           AND A.AUD_LOG_REF_SN = #{refSn}
+         ORDER BY A.AUD_LOG_SN DESC
+         LIMIT 1
+    </select>
+
+    <select id="selectByRequestId" resultType="nct.audit.domain.AuditLog">
+        /* 담당자 7 · REQ-OPS-003: 관리자 운영 요청의 영속 멱등성 확인 */
+        SELECT A.AUD_LOG_SN          AS audLogSn,
+               A.USR_SN              AS usrSn,
+               A.AUD_LOG_REF_TYPE_CD AS audLogRefTypeCd,
+               A.AUD_LOG_REF_SN      AS audLogRefSn,
+               A.AUD_LOG_BEFORE_CN   AS audLogBeforeCn,
+               A.AUD_LOG_AFTER_CN    AS audLogAfterCn,
+               A.AUD_LOG_REQ_ID      AS audLogReqId
+          FROM AUDIT_LOG A
+         WHERE A.AUD_LOG_REQ_ID = #{requestId}
+         ORDER BY A.AUD_LOG_SN DESC
+         LIMIT 1
+    </select>
+
+    <select id="countAdminLoginFailuresByTokenSince" resultType="long">
+        /* 담당자 7 · REQ-OPS-011: 원문 아이디·IP 없이 HMAC 토큰으로 반복 실패 집계 */
+        SELECT COUNT(*)
+          FROM AUDIT_LOG
+         WHERE AUD_LOG_TYPE_CD = 'AUDC0008'
+           AND AUD_LOG_REG_DT &gt;= #{since}
+           AND AUD_LOG_AFTER_CN LIKE CONCAT('%', #{tokenField}, '=', #{tokenValue}, '%')
+    </select>
+
+    <select id="selectHistory" resultType="nct.audit.domain.AuditLog">
+        /* 담당자 7 · F-OPS-016: 상세 화면의 주 대상·연관 대상 통합 이력 */
+        SELECT A.AUD_LOG_SN              AS audLogSn,
+               A.USR_SN                  AS usrSn,
+               U.USR_NM                  AS usrNm,
+               A.AUD_LOG_TYPE_CD         AS audLogTypeCd,
+               T.CMM_NM                  AS audLogTypeNm,
+               A.AUD_LOG_REF_TYPE_CD     AS audLogRefTypeCd,
+               R.CMM_NM                  AS refTypeNm,
+               A.AUD_LOG_REF_SN          AS audLogRefSn,
+               A.AUD_LOG_RSON_CN         AS audLogRsonCn,
+               A.AUD_LOG_BEFORE_CN       AS audLogBeforeCn,
+               A.AUD_LOG_AFTER_CN        AS audLogAfterCn,
+               A.AUD_LOG_REQ_ID          AS audLogReqId,
+               A.AUD_LOG_REL_REF_TYPE_CD AS audLogRelRefTypeCd,
+               RR.CMM_NM                 AS relRefTypeNm,
+               A.AUD_LOG_REL_REF_SN      AS audLogRelRefSn,
+               A.AUD_LOG_IP_ADDR         AS audLogIpAddr,
+               A.AUD_LOG_REG_DT          AS audLogRegDt
+        FROM AUDIT_LOG A
+        JOIN CMM_CODE T ON T.CMM_CD = A.AUD_LOG_TYPE_CD
+        LEFT JOIN CMM_CODE R ON R.CMM_CD = A.AUD_LOG_REF_TYPE_CD
+        LEFT JOIN CMM_CODE RR ON RR.CMM_CD = A.AUD_LOG_REL_REF_TYPE_CD
+        LEFT JOIN USERS U ON U.USR_SN = A.USR_SN
+        WHERE (A.AUD_LOG_REF_TYPE_CD = #{refTypeCd} AND A.AUD_LOG_REF_SN = #{refSn})
+           OR (A.AUD_LOG_REL_REF_TYPE_CD = #{refTypeCd} AND A.AUD_LOG_REL_REF_SN = #{refSn})
+        ORDER BY A.AUD_LOG_SN DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 메시지 원문을 읽기 전 거래 신고와 채팅방 연결 및 행 수만 확인합니다. -->
+    <select id="selectDisputeChatTarget" resultType="nct.audit.mapper.DisputeChatTarget">
+        SELECT RT.ABR_SN AS reportSn,
+               RT.TRD_SN AS tradeSn,
+               R.CH_RM_SN AS roomSn,
+               COUNT(M.CH_MSG_SN) AS messageCount
+        FROM ABUSE_REPORT_TRADE RT
+        LEFT JOIN CHAT_ROOM R ON R.TRD_SN = RT.TRD_SN
+        LEFT JOIN CHAT_MESSAGE M ON M.CH_RM_SN = R.CH_RM_SN
+        WHERE RT.ABR_SN = #{reportSn}
+        GROUP BY RT.ABR_SN, RT.TRD_SN, R.CH_RM_SN
+    </select>
+
+    <!-- 거래 신고에 연결된 채팅만 최신 페이지부터 조회합니다. -->
+    <select id="selectDisputeChatMessages" resultType="nct.audit.mapper.ChatMessageView">
+        SELECT M.CH_MSG_SN AS chMsgSn,
+               M.CH_RM_SN AS chRmSn,
+               M.USR_SN AS usrSn,
+               U.USR_NM AS usrNm,
+               M.CH_MSG_CN AS chMsgCn,
+               M.CH_MSG_REG_DT AS chMsgRegDt
+        FROM ABUSE_REPORT_TRADE RT
+        JOIN CHAT_ROOM R ON R.TRD_SN = RT.TRD_SN
+        JOIN CHAT_MESSAGE M ON M.CH_RM_SN = R.CH_RM_SN
+        LEFT JOIN USERS U ON U.USR_SN = M.USR_SN
+        WHERE RT.ABR_SN = #{reportSn}
+        ORDER BY M.CH_MSG_REG_DT DESC, M.CH_MSG_SN DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+</mapper>

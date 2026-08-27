@@ -1,0 +1,269 @@
+package nct.chat.service;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import lombok.RequiredArgsConstructor;
+import nct.chat.domain.ChatMessage;
+import nct.chat.domain.ChatRoom;
+import nct.chat.dto.ChatMessageResponse;
+import nct.chat.dto.ChatMessageSendRequest;
+import nct.chat.dto.ChatRoomAccess;
+import nct.chat.dto.ChatRoomResponse;
+import nct.chat.dto.OfflineTradeChatRoomCreateResult;
+import nct.chat.dto.ServiceTradeChatRoomCreateResult;
+import nct.chat.mapper.ChatMapper;
+import nct.global.exception.CustomException;
+import nct.global.exception.ErrorCode;
+import nct.notification.service.NotificationService;
+import nct.ops.security.port.SensitiveContentInspectionUseCase;
+
+/** 대면 거래 당사자만 사용할 수 있는 채팅 메시지 기능을 제공한다. */
+@Service
+@RequiredArgsConstructor
+public class ChatService {
+
+    private static final String ACTIVE_ROOM = "CHRC0001";
+    private static final String CLOSED_ROOM = "CHRC0002";
+    private static final String TRADE_REFERENCE = "REFC0005";
+    private static final long COMPLETED_TRADE_CHAT_GRACE_HOURS = 48;
+
+    private final ChatMapper chatMapper;
+    private final SensitiveContentInspectionUseCase sensitiveContentInspectionUseCase;
+    private final NotificationService notificationService;
+
+    /**
+     * F-AUC-023 공개 계약: 경매 거래 생성 흐름이 직거래에만 호출한다.
+     * 거래 행 잠금과 CHAT_ROOM의 거래별 유니크 제약을 함께 사용해 재시도에도 방을 하나만 유지한다.
+     */
+    @Transactional
+    public OfflineTradeChatRoomCreateResult createOrGetOfflineTradeChatRoom(long tradeId) {
+        if (tradeId <= 0 || chatMapper.findOfflineMaterialTradeIdForUpdate(tradeId) == null) {
+            throw new CustomException(ErrorCode.NOT_FOUND,
+                    "존재하지 않거나 직거래 채팅방을 생성할 수 없는 거래입니다.");
+        }
+
+        Long existingRoomId = chatMapper.findChatRoomIdByTradeId(tradeId);
+        if (existingRoomId != null) {
+            return new OfflineTradeChatRoomCreateResult(existingRoomId, false);
+        }
+
+        ChatRoom chatRoom = new ChatRoom();
+        chatRoom.setTradeId(tradeId);
+        chatRoom.setRoomStatus(ACTIVE_ROOM);
+        chatMapper.insertChatRoom(chatRoom);
+
+        return new OfflineTradeChatRoomCreateResult(chatRoom.getRoomId(), true);
+    }
+
+    /** 직거래 당사자가 버튼을 누른 시점에만 채팅방을 지연 생성한다. */
+    @Transactional
+    public OfflineTradeChatRoomCreateResult createOrGetOfflineTradeChatRoom(
+            long tradeId,
+            long userId) {
+        if (tradeId <= 0 || userId <= 0
+                || chatMapper.findMyOfflineMaterialTradeIdForUpdate(tradeId, userId) == null) {
+            throw new CustomException(ErrorCode.NOT_FOUND,
+                    "존재하지 않거나 직거래 채팅방을 생성할 수 없는 거래입니다.");
+        }
+
+        Long existingRoomId = chatMapper.findChatRoomIdByTradeId(tradeId);
+        if (existingRoomId != null) {
+            return new OfflineTradeChatRoomCreateResult(existingRoomId, false);
+        }
+
+        ChatRoom chatRoom = new ChatRoom();
+        chatRoom.setTradeId(tradeId);
+        chatRoom.setRoomStatus(ACTIVE_ROOM);
+        chatMapper.insertChatRoom(chatRoom);
+
+        return new OfflineTradeChatRoomCreateResult(chatRoom.getRoomId(), true);
+    }
+
+    /**
+     * F-SVC-017 공개 계약: 선택 견적·보관금 예치·서비스 거래 생성이 모두 성공한
+     * 상위 트랜잭션 안에서만 호출한다. 거래 행 잠금과 CHAT_ROOM의 거래별 유니크 제약을
+     * 함께 사용해 재시도에도 서비스 거래당 채팅방 하나만 유지한다.
+     */
+    @Transactional
+    public ServiceTradeChatRoomCreateResult createOrGetServiceTradeChatRoom(long tradeId) {
+        if (tradeId <= 0 || chatMapper.findServiceTradeIdForUpdate(tradeId) == null) {
+            throw new CustomException(ErrorCode.NOT_FOUND,
+                    "존재하지 않거나 서비스 채팅방을 생성할 수 없는 거래입니다.");
+        }
+
+        Long existingRoomId = chatMapper.findChatRoomIdByTradeId(tradeId);
+        if (existingRoomId != null) {
+            return new ServiceTradeChatRoomCreateResult(existingRoomId, false);
+        }
+
+        ChatRoom chatRoom = new ChatRoom();
+        chatRoom.setTradeId(tradeId);
+        chatRoom.setRoomStatus(ACTIVE_ROOM);
+        chatMapper.insertChatRoom(chatRoom);
+
+        return new ServiceTradeChatRoomCreateResult(chatRoom.getRoomId(), true);
+    }
+
+    /** 서비스 거래의 취소·분쟁 확정 트랜잭션에 합류해 채팅방을 읽기 전용으로 닫는다. */
+    @Transactional
+    public boolean closeServiceTradeChatRoom(long tradeId) {
+        if (tradeId <= 0) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE,
+                    "거래 번호가 올바르지 않습니다.");
+        }
+
+        return chatMapper.closeServiceTradeChatRoom(tradeId) > 0;
+    }
+
+    /** 거래 취소·분쟁은 완료 48시간 채팅 유예와 달리 즉시 채팅을 종료한다. */
+    @Transactional
+    public boolean closeTradeChatRoom(long tradeId) {
+        if (tradeId <= 0) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE,
+                    "거래 번호가 올바르지 않습니다.");
+        }
+
+        return chatMapper.closeTradeChatRoom(tradeId) > 0;
+    }
+
+    /** 담당자 7 · F-OPS-005/006: 거래 신고 완료ㆍ반려로 복구된 채팅을 조건부로 다시 엽니다. */
+    @Transactional
+    public boolean reopenTradeChatRoom(long tradeId) {
+        if (tradeId <= 0) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE,
+                    "거래 번호가 올바르지 않습니다.");
+        }
+        return chatMapper.reopenTradeChatRoom(tradeId) > 0;
+    }
+
+    /** 로그인 사용자가 참여하는 대면 거래 채팅방만 조회한다. */
+    @Transactional(readOnly = true)
+    public List<ChatRoomResponse> getMyChatRooms(long userId, Long tradeId) {
+        return chatMapper.findMyChatRooms(userId, tradeId);
+    }
+
+    /** 메시지를 조회한 사용자가 받았던 미확인 메시지는 읽음으로 함께 처리한다. */
+    @Transactional
+    public List<ChatMessageResponse> getMyChatMessages(long roomId, long userId) {
+        requireMyChatRoom(roomId, userId);
+        List<ChatMessageResponse> messages = chatMapper.findMyChatMessages(roomId, userId);
+
+        chatMapper.markCounterpartMessagesAsRead(roomId, userId);
+        return messages;
+    }
+
+    /**
+     * WebSocket 구독·전송 전에 현재 사용자가 해당 채팅방 당사자인지 확인한다.
+     * REST와 같은 권한 검사를 재사용해 방 번호만 추측한 구독을 차단한다.
+     */
+    @Transactional(readOnly = true)
+    public ChatRoomAccess requireMyActiveChatRoom(long roomId, long userId) {
+        ChatRoomAccess chatRoom = requireMyChatRoom(roomId, userId);
+        if (isReadOnly(chatRoom)) {
+            throw new CustomException(ErrorCode.ALREADY_PROCESSED,
+                    "종료된 거래의 채팅방에서는 기존 대화만 열람할 수 있습니다.");
+        }
+        return chatRoom;
+    }
+
+    /**
+     * 방을 구독한 사용자 기준으로 저장된 메시지를 다시 조회한다.
+     * senderType(ME/COUNTERPART)을 수신자별로 정확히 만들기 위해 사용한다.
+     */
+    @Transactional(readOnly = true)
+    public ChatMessageResponse getMyChatMessage(
+            long roomId,
+            long messageId,
+            long userId) {
+        requireMyChatRoom(roomId, userId);
+
+        ChatMessageResponse message = chatMapper.findMyChatMessageById(messageId, userId);
+        if (message == null) {
+            throw new CustomException(ErrorCode.CHAT_MESSAGE_NOT_FOUND);
+        }
+
+        return message;
+    }
+
+    /** 활성 채팅방에 마스킹된 메시지만 저장하고, 저장 결과를 화면에 반환한다. */
+    @Transactional
+    public ChatMessageResponse sendMessage(
+            long roomId,
+            long userId,
+            String actorId,
+            ChatMessageSendRequest request) {
+        validateMessageRequest(request);
+        ChatRoomAccess chatRoom = requireMyChatRoom(roomId, userId);
+
+        if (isReadOnly(chatRoom)) {
+            throw new CustomException(ErrorCode.ALREADY_PROCESSED,
+                    "종료된 거래의 채팅방에서는 기존 대화만 열람할 수 있습니다.");
+        }
+
+        String maskedContent = sensitiveContentInspectionUseCase.inspect(
+                request.getContent().trim(),
+                request.getDetectionKey(),
+                TRADE_REFERENCE,
+                chatRoom.getTradeId(),
+                actorId).maskedText();
+        ChatMessage message = new ChatMessage();
+        message.setRoomId(roomId);
+        message.setSenderUserId(userId);
+        message.setContent(maskedContent);
+        chatMapper.insertChatMessage(message);
+
+        if (chatRoom.getCounterpartUserId() != null
+                && chatRoom.getCounterpartUserId() != userId) {
+            notificationService.notifyChatMessage(chatRoom.getCounterpartUserId());
+        }
+
+        return chatMapper.findMyChatMessageById(message.getMessageId(), userId);
+    }
+
+    // WebSocket은 Controller의 @Valid를 거치지 않으므로 서비스 경계에서도 같은 입력 규칙을 지킨다.
+    private void validateMessageRequest(ChatMessageSendRequest request) {
+        if (request == null
+                || request.getContent() == null
+                || request.getContent().isBlank()
+                || request.getContent().trim().length() > 500
+                || request.getDetectionKey() == null
+                || request.getDetectionKey().isBlank()) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE,
+                    "메시지 내용과 요청 식별값을 확인해 주세요.");
+        }
+    }
+
+    // 채팅방 번호만으로는 접근을 허용하지 않고, 거래 당사자와 대면 거래 여부를 함께 검증한다.
+    private ChatRoomAccess requireMyChatRoom(long roomId, long userId) {
+        ChatRoomAccess chatRoom = chatMapper.findMyChatRoom(roomId, userId);
+
+        if (chatRoom == null) {
+            throw new CustomException(ErrorCode.NOT_FOUND,
+                    "존재하지 않거나 접근할 수 없는 채팅방입니다.");
+        }
+
+        return chatRoom;
+    }
+
+    private boolean isReadOnly(ChatRoomAccess chatRoom) {
+        return CLOSED_ROOM.equals(chatRoom.getRoomStatus())
+                || "TRDC0007".equals(chatRoom.getTradeStatus())
+                || "TRDC0008".equals(chatRoom.getTradeStatus())
+                || isCompletedTradeChatGraceExpired(chatRoom);
+    }
+
+    private boolean isCompletedTradeChatGraceExpired(ChatRoomAccess chatRoom) {
+        if (!"TRDC0006".equals(chatRoom.getTradeStatus())) {
+            return false;
+        }
+
+        // 기존 완료 거래 중 완료 이력이 없는 데이터는 종료 시점을 확정할 수 없어 안전하게 읽기 전용으로 처리한다.
+        LocalDateTime completedAt = chatRoom.getCompletedAt();
+        return completedAt == null
+                || !completedAt.plusHours(COMPLETED_TRADE_CHAT_GRACE_HOURS).isAfter(LocalDateTime.now());
+    }
+}

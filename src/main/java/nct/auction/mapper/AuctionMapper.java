@@ -1,0 +1,166 @@
+package nct.auction.mapper;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+
+import nct.auction.dto.AuctionIdByProduct;
+import nct.auction.dto.AuctionListItem;
+import nct.auction.dto.AuctionListRequest;
+import nct.auction.dto.AuctionBidCreateCommand;
+import nct.auction.dto.AuctionBidItem;
+import nct.auction.dto.AuctionBidTarget;
+import nct.auction.dto.AuctionCancellationTarget;
+import nct.auction.dto.AuctionDetailResponse;
+import nct.auction.dto.AuctionImageItem;
+import nct.auction.dto.AuctionReferenceTitle;
+import nct.auction.dto.AuctionReportReference;
+import nct.auction.dto.AuctionStatusResponse;
+import nct.auction.dto.AuctionStatusSummaryResponse;
+import nct.auction.dto.AuctionSanctionTarget;
+
+@Mapper
+public interface AuctionMapper {
+
+    List<AuctionListItem> findAuctions(@Param("condition") AuctionListRequest condition);
+
+    long countAuctions(@Param("condition") AuctionListRequest condition);
+
+    Long findProductIdByAuctionId(@Param("auctionId") Long auctionId);
+
+    // @ai_generated (담당자1 황희준, 2026-08-07, 조율 대기): REVIEW·TRADE 도메인이 상품당
+    // 경매번호를 Mapper에서 직접 JOIN하지 않고 조회하도록 신설. AUCTION.PRD_SN 유일 인덱스로
+    // 상품당 최대 1건이다.
+    Long findAuctionIdByProductId(@Param("productId") Long productId);
+
+    // @ai_generated (담당자1 황희준, 2026-08-07, 조율 대기): 위와 같은 목적의 배치 버전 —
+    // 리뷰 목록처럼 여러 행을 한 번에 조회할 때 상품 수만큼 개별 호출(N+1)하지 않기 위함.
+    List<AuctionIdByProduct> findAuctionIdsByProductIds(@Param("productIds") List<Long> productIds);
+
+    List<AuctionReferenceTitle> findAuctionReferenceTitles(
+            @Param("auctionIds") List<Long> auctionIds);
+
+    /** 담당자 7 · F-OPS-007: 종료·숨김 여부와 무관한 신고 검증용 최소 경매 정보입니다. */
+    AuctionReportReference findAuctionReportReference(@Param("auctionId") Long auctionId);
+
+    AuctionDetailResponse findAuctionDetail(
+            @Param("auctionId") Long auctionId,
+            @Param("userId") Long userId);
+
+    AuctionStatusResponse findAuctionStatusByProduct(@Param("prdSn") Long prdSn);
+
+    List<AuctionStatusSummaryResponse> findAuctionStatusesByProducts(@Param("prdSns") List<Long> prdSns);
+
+    List<AuctionImageItem> findAuctionImages(@Param("productId") Long productId);
+
+    List<AuctionBidItem> findAuctionBids(@Param("auctionId") Long auctionId);
+
+    AuctionBidTarget findAuctionBidTargetForUpdate(@Param("auctionId") Long auctionId);
+
+    AuctionCancellationTarget findAuctionCancellationTargetForUpdate(@Param("auctionId") Long auctionId);
+
+    List<AuctionSanctionTarget> findSanctionTargetsByMemberForUpdate(@Param("userSn") Long userSn);
+
+    /** 담당자 7 · F-OPS-007: 신고된 경매 한 건의 상태와 남은 시간을 잠금 조회합니다. */
+    AuctionSanctionTarget findReportHoldTargetForUpdate(@Param("auctionId") Long auctionId);
+
+    List<Long> findExpiredActiveAuctionIds(@Param("limit") int limit);
+
+    List<Long> findReadyAuctionIds(@Param("limit") int limit);
+
+    List<Long> findClosingSoonActiveAuctionIds(@Param("limit") int limit);
+
+    List<Long> findClosingSoonRecipientUserIds(@Param("auctionId") Long auctionId);
+
+    int insertAuction(
+            @Param("productId") Long productId,
+            @Param("statusCode") String statusCode,
+            @Param("currentAmount") BigDecimal currentAmount,
+            @Param("bidUnitAmount") BigDecimal bidUnitAmount,
+            @Param("startDateTime") LocalDateTime startDateTime,
+            @Param("endDateTime") LocalDateTime endDateTime,
+            @Param("actor") String actor);
+
+    int activateReadyAuction(
+            @Param("auctionId") Long auctionId,
+            @Param("actor") String actor);
+
+    int updateCurrentHighestBids(@Param("auctionId") Long auctionId);
+
+    int exceptionCancelHighestBid(
+            @Param("auctionId") Long auctionId,
+            @Param("bidId") Long bidId,
+            @Param("actor") String actor);
+
+    int updateCurrentHighestBidTradeMethod(
+            @Param("auctionId") Long auctionId,
+            @Param("bidId") Long bidId,
+            @Param("userId") Long userId,
+            @Param("tradeMethodCode") String tradeMethodCode,
+            @Param("deliveryAddressId") Long deliveryAddressId,
+            @Param("actor") String actor);
+
+    int insertBid(AuctionBidCreateCommand command);
+
+    int updateAuctionCurrentPrice(
+            @Param("auctionId") Long auctionId,
+            @Param("bidAmount") java.math.BigDecimal bidAmount,
+            @Param("actor") String actor);
+
+    int extendAuctionTime(
+            @Param("auctionId") Long auctionId,
+            @Param("extensionMinutes") int extensionMinutes,
+            @Param("maxExtensionCount") int maxExtensionCount,
+            @Param("actor") String actor);
+
+    int closeAuctionByInstantBuy(
+            @Param("auctionId") Long auctionId,
+            @Param("bidAmount") java.math.BigDecimal bidAmount,
+            @Param("actor") String actor);
+
+    int updateExpiredAuctionStatus(
+            @Param("auctionId") Long auctionId,
+            @Param("statusCode") String statusCode,
+            @Param("actor") String actor);
+
+    int updateAuctionStatusForCancellation(
+            @Param("auctionId") Long auctionId,
+            @Param("expectedStatusCode") String expectedStatusCode,
+            @Param("newStatusCode") String newStatusCode,
+            @Param("actor") String actor);
+
+    /** 취소 요청 반려 시점에 이미 종료시각이 지났으면 새 종료시각으로 덮어쓴다 — 검토 지연 보상용 */
+    void extendAuctionEndDateTime(
+            @Param("auctionId") Long auctionId,
+            @Param("newEndDateTime") LocalDateTime newEndDateTime,
+            @Param("actor") String actor);
+
+    int pauseAuctionForSanction(
+            @Param("auctionId") Long auctionId,
+            @Param("expectedStatusCode") String expectedStatusCode,
+            @Param("actor") String actor);
+
+    /** 담당자 7 · F-OPS-003: 진행 중 경매를 관리자 수동 일시중지 상태로 전환합니다. */
+    int pauseAuctionForAdmin(
+            @Param("auctionId") Long auctionId,
+            @Param("actor") String actor);
+
+    /** 관리자 일시중지 시간을 종료시각에 더해 진행 상태로 복구합니다. */
+    int resumeAuctionAfterAdminPause(
+            @Param("auctionId") Long auctionId,
+            @Param("actor") String actor);
+
+    int restoreAuctionAfterSanction(
+            @Param("auctionId") Long auctionId,
+            @Param("statusCode") String statusCode,
+            @Param("remainingStartSeconds") Long remainingStartSeconds,
+            @Param("remainingSeconds") Long remainingSeconds,
+            @Param("actor") String actor);
+
+    // @ai_generated (담당자1 황희준, 2026-08-12, 조율 대기): F-AUTH-011/POL-AUTH-013 - 탈퇴 전
+    // 하드 차단용. 본인이 판매자인 상품 중 진행 중(AUCC0002) 경매 건수를 센다.
+    int countActiveSellerAuctions(@Param("userSn") Long userSn);
+}

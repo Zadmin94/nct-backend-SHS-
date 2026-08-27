@@ -1,0 +1,28 @@
+package nct.auction.dto;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
+public class AuctionBidTarget {
+
+    private Long auctionId;
+    private Long productId;
+    private String productUseYn;
+    private Long sellerId;
+    private Long currentHighestBidId;
+    private Long currentHighestBidderId;
+    private String currentHighestTradeMethodCode;
+    private Long currentHighestDeliveryAddressId;
+    private BigDecimal currentPrice;
+    private BigDecimal bidUnitPrice;
+    private BigDecimal instantBuyPrice;
+    private String tradeMethodCode;
+    private String auctionStatusCode;
+    private LocalDateTime endDateTime;
+    private LocalDateTime databaseNow;
+}

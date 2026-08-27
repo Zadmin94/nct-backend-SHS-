@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    [MemberMapper.xml - 인증용 회원 조회/저장]
+    - namespace : Java Mapper 인터페이스의 전체 경로와 일치
+    - SQL id    : 인터페이스 메서드명과 일치
+-->
+<mapper namespace="nct.member.mapper.MemberMapper">
+
+    
+    <resultMap id="memberMap" type="nct.member.domain.Member">
+        <id     column="USR_SN"                 property="usrSn"/>
+        <result column="USR_LOGIN_ID"           property="usrLoginId"/>
+        <result column="USR_PSWD_HASH"          property="usrPswdHash"/>
+        <result column="USR_REFRESH_TOKEN_HASH" property="usrRefreshTokenHash"/>
+        <result column="USR_NM"                 property="usrNm"/>
+        <result column="USR_EML_ENC"            property="usrEml"/>
+        <result column="USR_EML_HMAC"           property="usrEmlHmac"/>
+        <result column="USR_EML_CERT_YN"        property="usrEmlCertYn"/>
+        <result column="USR_TELNO_ENC"          property="usrTelno"/>
+        <result column="USR_ADDR_ENC"           property="usrAddr"/>
+        <result column="USR_DADDR_ENC"          property="usrDaddr"/>
+        <result column="USR_ZIP_ENC"            property="usrZip"/>
+        <result column="USR_BANK_NM_ENC"        property="usrBankNm"/>
+        <result column="USR_ACNT_NO_ENC"        property="usrAcntNo"/>
+        <result column="USR_PRFL_FL_SN"         property="usrPrflFlSn"/>
+        <result column="USR_STATUS_CD"          property="usrStatusCd"/>
+        <result column="USR_ROLE_CD"            property="usrRoleCd"/>
+        <result column="USR_ADULT_CERT_YN"      property="usrAdultCertYn"/>
+        <result column="USR_ADULT_CERT_DT"      property="usrAdultCertDt"/>
+        <result column="USR_USE_YN"             property="usrUseYn"/>
+        <result column="USR_REG_DT"             property="usrRegDt"/>
+        <result column="USR_UPDT_DT"            property="usrUpdtDt"/>
+        <result column="USR_REG_ID"             property="usrRegId"/>
+        <result column="USR_UPDT_ID"            property="usrUpdtId"/>
+    </resultMap>
+
+    <!-- @ai_generated: 통합검증 중 발견 - USR_USE_YN='Y' 필터가 있으면 탈퇴(USE_YN='N') 계정이
+         "존재하지 않는 사용자"로 걸러져 F-AUTH-009의 WITHDRAWN_USER(410) 분기에 도달하지 못하고
+         INVALID_CREDENTIALS(401)/USER_NOT_FOUND(404)로 뭉뚱그려졌다. 상태 판별은 USR_STATUS_CD로만
+         하도록 이 필터를 제거한다(existsByLoginId/ByEmail/ByNickname도 원래 이 필터가 없어 회원가입
+         재사용 방지 등 다른 목적과 충돌하지 않음을 확인했다). -->
+
+    <!-- 이메일로 회원 조회 -->
+    <select id="findMemberByEmail" parameterType="String" resultMap="memberMap">
+        /* 이메일로 회원 조회 */
+        SELECT
+            USR_SN, USR_LOGIN_ID, USR_PSWD_HASH, USR_REFRESH_TOKEN_HASH, USR_NM, USR_EML_ENC, USR_EML_HMAC,
+            USR_EML_CERT_YN, USR_TELNO_ENC, USR_ADDR_ENC, USR_DADDR_ENC, USR_ZIP_ENC,
+            USR_BANK_NM_ENC, USR_ACNT_NO_ENC, USR_PRFL_FL_SN, USR_STATUS_CD, USR_ROLE_CD,
+            USR_ADULT_CERT_YN, USR_ADULT_CERT_DT, USR_USE_YN, USR_REG_DT, USR_UPDT_DT,
+            USR_REG_ID, USR_UPDT_ID
+        FROM   USERS
+        WHERE  USR_EML_HMAC = #{emailHmac}
+    </select>
+
+    <!-- @ai_generated: F-AUTH-011 TOCTOU 하드닝 - 정지 계정 탈퇴 확정 직전 잠금 조회 전용.
+         일반 조회(findMemberByEmail)와 컬럼은 동일하고 FOR UPDATE만 추가한다. -->
+    <select id="findMemberByEmailForUpdate" parameterType="String" resultMap="memberMap">
+        SELECT
+            USR_SN, USR_LOGIN_ID, USR_PSWD_HASH, USR_REFRESH_TOKEN_HASH, USR_NM, USR_EML_ENC, USR_EML_HMAC,
+            USR_EML_CERT_YN, USR_TELNO_ENC, USR_ADDR_ENC, USR_DADDR_ENC, USR_ZIP_ENC,
+            USR_BANK_NM_ENC, USR_ACNT_NO_ENC, USR_PRFL_FL_SN, USR_STATUS_CD, USR_ROLE_CD,
+            USR_ADULT_CERT_YN, USR_ADULT_CERT_DT, USR_USE_YN, USR_REG_DT, USR_UPDT_DT,
+            USR_REG_ID, USR_UPDT_ID
+        FROM   USERS
+        WHERE  USR_EML_HMAC = #{emailHmac}
+        FOR UPDATE
+    </select>
+
+    <!-- @ai_generated: 로컬 로그인은 USR_LOGIN_ID로 조회하고 이메일은 JWT/인증용으로 유지한다. -->
+    <select id="findMemberByLoginId" parameterType="String" resultMap="memberMap">
+        SELECT
+            USR_SN, USR_LOGIN_ID, USR_PSWD_HASH, USR_REFRESH_TOKEN_HASH, USR_NM, USR_EML_ENC, USR_EML_HMAC,
+            USR_EML_CERT_YN, USR_TELNO_ENC, USR_ADDR_ENC, USR_DADDR_ENC, USR_ZIP_ENC,
+            USR_BANK_NM_ENC, USR_ACNT_NO_ENC, USR_PRFL_FL_SN, USR_STATUS_CD, USR_ROLE_CD,
+            USR_ADULT_CERT_YN, USR_ADULT_CERT_DT, USR_USE_YN, USR_REG_DT, USR_UPDT_DT,
+            USR_REG_ID, USR_UPDT_ID
+        FROM USERS
+        WHERE USR_LOGIN_ID = #{loginId}
+    </select>
+
+    <!-- @ai_generated: JWT subject(usrSn) 기반 조회 - 로그인 필터·재발급 검증에 사용 (가변 필드인 email 대신 불변 PK 사용) -->
+    <select id="findMemberById" parameterType="Long" resultMap="memberMap">
+        SELECT
+            USR_SN, USR_LOGIN_ID, USR_PSWD_HASH, USR_REFRESH_TOKEN_HASH, USR_NM, USR_EML_ENC, USR_EML_HMAC,
+            USR_EML_CERT_YN, USR_TELNO_ENC, USR_ADDR_ENC, USR_DADDR_ENC, USR_ZIP_ENC,
+            USR_BANK_NM_ENC, USR_ACNT_NO_ENC, USR_PRFL_FL_SN, USR_STATUS_CD, USR_ROLE_CD,
+            USR_ADULT_CERT_YN, USR_ADULT_CERT_DT, USR_USE_YN, USR_REG_DT, USR_UPDT_DT,
+            USR_REG_ID, USR_UPDT_ID
+        FROM USERS
+        WHERE USR_SN = #{usrSn}
+    </select>
+
+    <!-- 담당자 7 통합 연결 · F-COM-008~009 지원: 거래 프로필에 필요한 공개 필드만 선택한다.
+         탈퇴 상태는 USR_USE_YN 값이 남아 있어도 존재하지 않는 회원과 같은 조회 결과로 처리한다. -->
+    <select id="findPublicProfileById" resultType="nct.member.dto.PublicUserProfileSource">
+        SELECT USR_SN AS userSn,
+               USR_NM AS displayName,
+               USR_PRFL_FL_SN AS profileFileSn
+        FROM USERS
+        WHERE USR_SN = #{usrSn}
+          AND USR_USE_YN = 'Y'
+          AND USR_STATUS_CD &lt;&gt; 'USRC0003'
+    </select>
+
+    <!-- 담당자 7 · F-OPS-002/019: 상태 변경 직전 회원 행을 잠가 중복 관리자 요청을 직렬화한다. -->
+    <select id="findMemberByIdForUpdate" parameterType="Long" resultMap="memberMap">
+        SELECT
+            USR_SN, USR_LOGIN_ID, USR_PSWD_HASH, USR_REFRESH_TOKEN_HASH, USR_NM, USR_EML_ENC, USR_EML_HMAC,
+            USR_EML_CERT_YN, USR_TELNO_ENC, USR_ADDR_ENC, USR_DADDR_ENC, USR_ZIP_ENC,
+            USR_BANK_NM_ENC, USR_ACNT_NO_ENC, USR_PRFL_FL_SN, USR_STATUS_CD, USR_ROLE_CD,
+            USR_ADULT_CERT_YN, USR_ADULT_CERT_DT, USR_USE_YN, USR_REG_DT, USR_UPDT_DT,
+            USR_REG_ID, USR_UPDT_ID
+        FROM USERS
+        WHERE USR_SN = #{usrSn}
+        FOR UPDATE
+    </select>
+
+    <!-- 담당자 7 · F-OPS-002: 운영 화면에는 개인정보 원문을 포함하지 않는다. -->
+    <sql id="adminMemberFilter">
+        <where>
+            <if test="statusCode != null and statusCode != ''">
+                u.USR_STATUS_CD = #{statusCode}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                <if test="statusCode != null and statusCode != ''">AND</if>
+                (
+                    u.USR_LOGIN_ID LIKE CONCAT('%', #{keyword}, '%')
+                    OR u.USR_NM LIKE CONCAT('%', #{keyword}, '%')
+                    OR CAST(u.USR_SN AS CHAR) = #{keyword}
+                )
+            </if>
+        </where>
+    </sql>
+
+    <select id="findAdminMembers" resultType="nct.member.dto.AdminMemberSource">
+        SELECT u.USR_SN AS userSn,
+               u.USR_LOGIN_ID AS loginId,
+               u.USR_NM AS nickname,
+               u.USR_STATUS_CD AS statusCode,
+               status_code.CMM_NM AS statusName,
+               u.USR_ROLE_CD AS roleCode,
+               role_code.CMM_NM AS roleName,
+               u.USR_USE_YN AS useYn,
+               COALESCE(report_count.REPORT_COUNT, 0) AS reportCount,
+               u.USR_REG_DT AS registeredAt,
+               u.USR_UPDT_DT AS updatedAt
+        FROM USERS u
+        LEFT JOIN CMM_CODE status_code ON status_code.CMM_CD = u.USR_STATUS_CD
+        LEFT JOIN CMM_CODE role_code ON role_code.CMM_CD = u.USR_ROLE_CD
+        LEFT JOIN (
+            SELECT RPTD_USR_SN, COUNT(*) AS REPORT_COUNT
+            FROM ABUSE_REPORT
+            WHERE RPTD_USR_SN IS NOT NULL
+            GROUP BY RPTD_USR_SN
+        ) report_count ON report_count.RPTD_USR_SN = u.USR_SN
+        <include refid="adminMemberFilter"/>
+        ORDER BY u.USR_REG_DT DESC, u.USR_SN DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countAdminMembers" resultType="long">
+        SELECT COUNT(*)
+        FROM USERS u
+        <include refid="adminMemberFilter"/>
+    </select>
+
+    <select id="findAdminMemberById" resultType="nct.member.dto.AdminMemberSource">
+        SELECT u.USR_SN AS userSn,
+               u.USR_LOGIN_ID AS loginId,
+               u.USR_NM AS nickname,
+               u.USR_STATUS_CD AS statusCode,
+               status_code.CMM_NM AS statusName,
+               u.USR_ROLE_CD AS roleCode,
+               role_code.CMM_NM AS roleName,
+               u.USR_USE_YN AS useYn,
+               (SELECT COUNT(*) FROM ABUSE_REPORT report WHERE report.RPTD_USR_SN = u.USR_SN) AS reportCount,
+               u.USR_REG_DT AS registeredAt,
+               u.USR_UPDT_DT AS updatedAt
+        FROM USERS u
+        LEFT JOIN CMM_CODE status_code ON status_code.CMM_CD = u.USR_STATUS_CD
+        LEFT JOIN CMM_CODE role_code ON role_code.CMM_CD = u.USR_ROLE_CD
+        WHERE u.USR_SN = #{usrSn}
+    </select>
+
+    <select id="findAdminMemberIdentities"
+            resultType="nct.member.dto.AdminMemberIdentityResponse">
+        SELECT USR_SN AS userSn,
+               USR_LOGIN_ID AS loginId,
+               USR_NM AS nickname
+          FROM USERS
+         WHERE USR_SN IN
+        <foreach collection="userSns" item="userSn" open="(" separator="," close=")">
+            #{userSn}
+        </foreach>
+    </select>
+
+    <!-- @ai_generated: UNIQUE 제약 전 사전 확인은 UX용이며 최종 INSERT 제약도 별도로 처리한다. -->
+    <select id="existsByLoginId" parameterType="String" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM USERS WHERE USR_LOGIN_ID = #{loginId})
+    </select>
+
+    <select id="existsByNickname" parameterType="String" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM USERS WHERE USR_NM = #{nickname})
+    </select>
+
+    <select id="existsByEmail" parameterType="String" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM USERS WHERE USR_EML_HMAC = #{emailHmac})
+    </select>
+
+    <!-- @ai_generated: 인증 완료 가입만 USERS를 생성하고 이메일 인증 완료값을 함께 저장한다. -->
+    <insert id="saveCertifiedMember" parameterType="nct.member.domain.Member"
+            useGeneratedKeys="true" keyProperty="usrSn">
+        /* 인증 완료 회원 가입 */
+        INSERT INTO USERS (
+            USR_LOGIN_ID, USR_PSWD_HASH, USR_NM, USR_EML_ENC, USR_EML_HMAC, USR_EML_CERT_YN,
+            USR_TELNO_ENC, USR_ADDR_ENC, USR_DADDR_ENC, USR_ZIP_ENC, USR_BANK_NM_ENC, USR_ACNT_NO_ENC,
+            USR_STATUS_CD, USR_ROLE_CD
+        ) VALUES (
+            #{usrLoginId}, #{usrPswdHash}, #{usrNm}, #{usrEml}, #{usrEmlHmac}, #{usrEmlCertYn},
+            #{usrTelno}, #{usrAddr}, #{usrDaddr}, #{usrZip}, #{usrBankNm}, #{usrAcntNo},
+            #{usrStatusCd}, #{usrRoleCd}
+        )
+        <!-- 생략 컬럼 (USERS DDL 기준):
+             · nullable(DEFAULT NULL): USR_REFRESH_TOKEN_HASH, USR_PRFL_FL_SN, USR_ADULT_CERT_DT
+             · DB DEFAULT 보유: USR_ADULT_CERT_YN('N'),
+               USR_USE_YN('Y'), USR_REG_DT/USR_UPDT_DT(CURRENT_TIMESTAMP), USR_REG_ID/USR_UPDT_ID('SYSTEM')
+             · USR_STATUS_CD 는 NOT NULL & DEFAULT 없음 -> 필수 지정 (어댑터에서 세팅) -->
+    </insert>
+
+    <!-- Refresh Token 저장/삭제 (로그인 시 저장, 로그아웃 시 null)
+         · @ai_generated: 애플리케이션 계층(TokenHashUtil)에서 SHA-256 해시화한 값을 전달받아 저장한다 (원문 저장 금지)
+         · USR_UPDT_DT 는 테이블 DDL 의 ON UPDATE CURRENT_TIMESTAMP 로 자동 갱신되므로 여기서 지정하지 않음 -->
+    <update id="updateRefreshTokenById">
+        /* Refresh Token 해시 갱신 */
+        UPDATE USERS
+        SET    USR_REFRESH_TOKEN_HASH = #{refreshTokenHash}
+        WHERE  USR_SN = #{usrSn}
+    </update>
+
+    <!-- 담당자 7 · F-OPS-019: 상태 전이와 로그인 세션 폐기를 같은 UPDATE로 보장한다. -->
+    <update id="updateStatusAndInvalidateRefreshToken">
+        UPDATE USERS
+        SET USR_STATUS_CD = #{targetStatusCode},
+            USR_REFRESH_TOKEN_HASH = NULL,
+            USR_UPDT_ID = #{updaterId}
+        WHERE USR_SN = #{usrSn}
+          AND USR_STATUS_CD = #{expectedStatusCode}
+          AND USR_STATUS_CD IN ('USRC0001', 'USRC0002')
+    </update>
+
+    <!-- @ai_generated: CHG-032/F-PROV-015 - USERS.USR_ROLE_CD는 현재 활성 접근 역할이다. -->
+    <update id="updateRoleById">
+        /* 일반/제공자 현재 접근 역할 변경 */
+        UPDATE USERS
+        SET    USR_ROLE_CD = #{role}
+        WHERE  USR_SN = #{usrSn}
+    </update>
+
+    <!-- @ai_generated: F-AUTH-007 - 비밀번호 재설정 완료 시 USR_PSWD_HASH 갱신 -->
+    <update id="updatePasswordById">
+        /* 비밀번호 해시 갱신 */
+        UPDATE USERS
+        SET    USR_PSWD_HASH = #{encodedPassword}
+        WHERE  USR_SN = #{usrSn}
+    </update>
+
+    <!-- @ai_generated: F-AUTH-010 - POL-AUTH-014 대상 필드(닉네임·프로필사진·연락이메일·계좌번호)만 갱신.
+         닉네임·이메일·전화번호는 DTO에서 @NotBlank라 항상 값이 온다(전화번호는 ISS-023으로 필수 전환).
+         계좌 쌍은 clearBankAccount일 때 두 컬럼을 함께 NULL로 지우고, 미전송이면 기존 값을 함께 유지한다.
+         주소 문자열도 각 clear 플래그로 명시적 삭제와 미전송을 구분하고, 프로필사진은 COALESCE로 유지한다. -->
+    <update id="updateProfile">
+        /* 프로필 기본 정보 수정 */
+        UPDATE USERS
+        SET    USR_NM = #{nickname},
+               USR_PRFL_FL_SN = COALESCE(#{profileFileSn}, USR_PRFL_FL_SN),
+               USR_EML_ENC = #{emailCiphertext},
+               USR_EML_HMAC = #{emailHmac},
+               <choose>
+                   <when test="clearBankAccount">
+                       USR_BANK_NM_ENC = NULL,
+                       USR_ACNT_NO_ENC = NULL,
+                   </when>
+                   <otherwise>
+                       USR_BANK_NM_ENC = COALESCE(#{bankNameCiphertext}, USR_BANK_NM_ENC),
+                       USR_ACNT_NO_ENC = COALESCE(#{accountNoCiphertext}, USR_ACNT_NO_ENC),
+                   </otherwise>
+               </choose>
+               USR_TELNO_ENC = #{telnoCiphertext},
+               <choose>
+                   <when test="clearZip">
+                       USR_ZIP_ENC = NULL,
+                   </when>
+                   <otherwise>
+                       USR_ZIP_ENC = COALESCE(#{zipCiphertext}, USR_ZIP_ENC),
+                   </otherwise>
+               </choose>
+               <choose>
+                   <when test="clearAddress">
+                       USR_ADDR_ENC = NULL,
+                   </when>
+                   <otherwise>
+                       USR_ADDR_ENC = COALESCE(#{addressCiphertext}, USR_ADDR_ENC),
+                   </otherwise>
+               </choose>
+               <choose>
+                   <when test="clearAddressDetail">
+                       USR_DADDR_ENC = NULL
+                   </when>
+                   <otherwise>
+                       USR_DADDR_ENC = COALESCE(#{addressDetailCiphertext}, USR_DADDR_ENC)
+                   </otherwise>
+               </choose>
+        WHERE  USR_SN = #{usrSn}
+    </update>
+
+    <!-- @ai_generated: F-AUTH-011/POL-AUTH-013 - 컬럼별 보존 범위: 연락처·주소·계좌는 즉시 null,
+         로그인ID는 원본 유지(여기서 갱신 안 함), 이메일·닉네임은 익명값 치환, 프로필사진은 참조 해제 -->
+    <update id="withdraw">
+        /* 회원 탈퇴 - 상태 전환 + 보존 데이터 컬럼별 처리 */
+        UPDATE USERS
+        SET    USR_STATUS_CD = 'USRC0003',
+               USR_TELNO_ENC = NULL,
+               USR_ADDR_ENC = NULL,
+               USR_DADDR_ENC = NULL,
+               USR_ZIP_ENC = NULL,
+               USR_BANK_NM_ENC = NULL,
+               USR_ACNT_NO_ENC = NULL,
+               USR_EML_ENC = #{anonymizedEmailCiphertext},
+               USR_EML_HMAC = #{anonymizedEmailHmac},
+               USR_NM = #{anonymizedNickname},
+               USR_PRFL_FL_SN = NULL
+        WHERE  USR_SN = #{usrSn}
+    </update>
+
+</mapper>

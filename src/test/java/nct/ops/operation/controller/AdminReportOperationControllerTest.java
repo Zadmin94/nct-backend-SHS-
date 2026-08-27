@@ -1,0 +1,105 @@
+package nct.ops.operation.controller;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.security.access.prepost.PreAuthorize;
+
+import nct.global.security.domain.CustomUserDetails;
+import nct.global.security.port.AuthMember;
+import nct.abuse.dto.AdminAbuseReportResponse;
+import nct.ops.operation.dto.AdminReportDecisionRequest;
+import nct.ops.operation.dto.AdminReportPageResponse;
+import nct.ops.operation.port.AdminReportDecision;
+import nct.ops.operation.domain.AdminDisputeDecision;
+import nct.ops.operation.domain.ReportEnforcementAction;
+import nct.ops.operation.service.AdminReportOperationService;
+
+/** 담당자 7 · F-OPS-007: 관리자 신고 처리 컨트롤러 전달값을 검증합니다. */
+class AdminReportOperationControllerTest {
+
+    @Test
+    void requiresAdminRoleForEveryReportOperation() {
+        PreAuthorize annotation = AdminReportOperationController.class.getAnnotation(PreAuthorize.class);
+
+        assertThat(annotation).isNotNull();
+        assertThat(annotation.value()).isEqualTo("hasAuthority('ROLE_ADMIN')");
+    }
+
+    @Test
+    void forwardsDecisionWithAuthenticatedAdmin() {
+        AdminReportOperationService service = mock(AdminReportOperationService.class);
+        AdminReportOperationController controller = new AdminReportOperationController(service);
+        AdminReportDecisionRequest request = new AdminReportDecisionRequest();
+        request.setDecision(AdminReportDecision.REJECTED);
+        request.setTradeDecision(AdminDisputeDecision.REJECT);
+        request.setReason(" insufficient evidence ");
+
+        controller.decide(91L, request, adminUserDetails(7L));
+
+        verify(service).decide(
+                91L,
+                AdminReportDecision.REJECTED,
+                AdminDisputeDecision.REJECT,
+                ReportEnforcementAction.NONE,
+                " insufficient evidence ",
+                7L);
+    }
+
+    @Test
+    void returnsPendingReports() {
+        AdminReportOperationService service = mock(AdminReportOperationService.class);
+        AdminReportOperationController controller = new AdminReportOperationController(service);
+        List<AdminAbuseReportResponse> reports = List.of(new AdminAbuseReportResponse());
+        when(service.getPendingReports()).thenReturn(reports);
+
+        controller.getPendingReports();
+
+        verify(service).getPendingReports();
+    }
+
+    @Test
+    void forwardsAdminReportSearchConditions() {
+        AdminReportOperationService service = mock(AdminReportOperationService.class);
+        AdminReportOperationController controller = new AdminReportOperationController(service);
+        AdminReportPageResponse page = AdminReportPageResponse.builder()
+                .items(List.of())
+                .page(2)
+                .size(20)
+                .totalItems(21)
+                .totalPages(2)
+                .build();
+        when(service.getReports("ABSC0003", "신고", "TRADE_ISSUE", 2, 20)).thenReturn(page);
+
+        controller.getReports("ABSC0003", "신고", "TRADE_ISSUE", 2, 20);
+
+        verify(service).getReports("ABSC0003", "신고", "TRADE_ISSUE", 2, 20);
+    }
+
+    @Test
+    void returnsReportDetail() {
+        AdminReportOperationService service = mock(AdminReportOperationService.class);
+        AdminReportOperationController controller = new AdminReportOperationController(service);
+        AdminAbuseReportResponse report = new AdminAbuseReportResponse();
+        when(service.getReportDetail(91L)).thenReturn(report);
+
+        controller.getReportDetail(91L);
+
+        verify(service).getReportDetail(91L);
+    }
+
+    private CustomUserDetails adminUserDetails(Long userId) {
+        return new CustomUserDetails(AuthMember.builder()
+                .id(userId)
+                .email("admin@example.com")
+                .password("{noop}test")
+                .role("ROLE_ADMIN")
+                .status("USRC0001")
+                .build());
+    }
+}

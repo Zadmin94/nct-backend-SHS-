@@ -1,0 +1,62 @@
+package nct.auction.dto;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+import lombok.Getter;
+import lombok.Setter;
+import nct.auction.constant.AuctionStatusCode;
+import nct.auction.constant.BidStatusCode;
+
+@Getter
+@Setter
+public class MyBidHistoryItem {
+
+    private Long bidSn;
+    private Long tradeId;
+    private Long aucSn;
+    private Long prdSn;
+    private String auctionTitle;
+    private String thumbnailPath;
+    private BigDecimal bidAmount;
+    private BigDecimal currentPrice;
+    private BigDecimal instantBuyPrice;
+    private String tradeMethodCode;
+    private String tradeMethodName;
+    private String bidStatusCode;
+    private String auctionStatusCode;
+    private LocalDateTime bidDateTime;
+    private LocalDateTime auctionEndDateTime;
+    private Long sellerSn;
+    private String sellerName;
+
+    public String resolveDisplayStatus() {
+        return getDisplayStatus();
+    }
+
+    @JsonProperty("displayStatus")
+    public String getDisplayStatus() {
+        // @ai_generated (마이페이지 구매 목록 필터 개편, 2026-08-09): 취소 요청 상태도
+        // 참여 경매 목록에서 종료 > 취소로 분류되어야 한다.
+        if (BidStatusCode.CANCELED.equals(bidStatusCode)
+                || BidStatusCode.EXCEPTION_CANCELED.equals(bidStatusCode)
+                || AuctionStatusCode.CANCELED.equals(auctionStatusCode)
+                || AuctionStatusCode.CANCEL_REQUESTED.equals(auctionStatusCode)) {
+            return "CANCELED";
+        }
+        if (BidStatusCode.OUTBID.equals(bidStatusCode)) {
+            return "OUTBID";
+        }
+        if (BidStatusCode.HIGHEST.equals(bidStatusCode)
+                && AuctionStatusCode.ACTIVE.equals(auctionStatusCode)) {
+            return "HIGHEST";
+        }
+        if (BidStatusCode.HIGHEST.equals(bidStatusCode)
+                && AuctionStatusCode.ENDED.equals(auctionStatusCode)) {
+            return "WON";
+        }
+        return "UNKNOWN";
+    }
+}

@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="nct.product.mapper.ProductCommentMapper">
+
+    <insert id="insertComment" useGeneratedKeys="true" keyProperty="prdCmtSn">
+        INSERT INTO PRODUCT_COMMENT (
+            PRD_SN,
+            USR_SN,
+            PRD_CMT_TYPE_CD,
+            PRD_CMT_TTL,
+            PRD_CMT_CN,
+            PRD_CMT_REG_ID,
+            PRD_CMT_UPDT_ID
+        ) VALUES (
+            #{prdSn},
+            #{usrSn},
+            #{prdCmtTypeCd},
+            #{prdCmtTtl},
+            #{prdCmtCn},
+            #{prdCmtRegId},
+            #{prdCmtUpdtId}
+        )
+    </insert>
+
+    <select id="findLatestComments" resultType="nct.product.dto.ProductCommentResponse">
+        SELECT PRD_CMT_SN    AS prdCmtSn,
+               PRD_CMT_TTL   AS prdCmtTtl,
+               PRD_CMT_CN    AS prdCmtCn,
+               PRD_CMT_REG_DT  AS prdCmtRegDt,
+               PRD_CMT_UPDT_DT AS prdCmtUpdtDt
+          FROM PRODUCT_COMMENT
+         WHERE PRD_SN = #{prdSn}
+           AND PRD_CMT_TYPE_CD = 'PRDC0005'
+         ORDER BY PRD_CMT_SN DESC
+         LIMIT #{limit}
+    </select>
+
+    <!-- 구매자 문의 등록 (PRDC0006) -->
+    <insert id="insertInquiry" useGeneratedKeys="true" keyProperty="prdCmtSn">
+        INSERT INTO PRODUCT_COMMENT (
+            PRD_SN,
+            USR_SN,
+            PRD_CMT_TYPE_CD,
+            PRD_CMT_CN,
+            PRD_CMT_REG_ID,
+            PRD_CMT_UPDT_ID
+        ) VALUES (
+            #{prdSn},
+            #{usrSn},
+            'PRDC0006',
+            #{prdCmtCn},
+            #{prdCmtRegId},
+            #{prdCmtUpdtId}
+        )
+    </insert>
+
+    <!-- 판매자 답변 등록 (PRDC0007) -->
+    <insert id="insertReply" useGeneratedKeys="true" keyProperty="prdCmtSn">
+        INSERT INTO PRODUCT_COMMENT (
+            PRD_SN,
+            USR_SN,
+            PRD_CMT_TYPE_CD,
+            PRD_CMT_PARENT_SN,
+            PRD_CMT_CN,
+            PRD_CMT_REG_ID,
+            PRD_CMT_UPDT_ID
+        ) VALUES (
+            #{prdSn},
+            #{usrSn},
+            'PRDC0007',
+            #{prdCmtParentSn},
+            #{prdCmtCn},
+            #{prdCmtRegId},
+            #{prdCmtUpdtId}
+        )
+    </insert>
+
+    <!-- 구매자 문의 목록 조회 (문의 + 답변 flat 조회, 프론트에서 그룹핑) -->
+    <select id="findInquiries" resultType="nct.product.dto.ProductInquiryResponse">
+        SELECT c.PRD_CMT_SN       AS prdCmtSn,
+               c.USR_SN           AS usrSn,
+               u.USR_NM           AS usrNm,
+               c.PRD_CMT_TYPE_CD  AS prdCmtTypeCd,
+               c.PRD_CMT_PARENT_SN AS prdCmtParentSn,
+               c.PRD_CMT_CN       AS prdCmtCn,
+               c.PRD_CMT_REG_DT   AS prdCmtRegDt
+          FROM PRODUCT_COMMENT c
+          JOIN USERS u ON u.USR_SN = c.USR_SN
+         WHERE c.PRD_SN = #{prdSn}
+           AND c.PRD_CMT_TYPE_CD IN ('PRDC0006', 'PRDC0007')
+         ORDER BY COALESCE(c.PRD_CMT_PARENT_SN, c.PRD_CMT_SN), c.PRD_CMT_TYPE_CD
+    </select>
+
+    <!-- 신고 검증용 문의 단건 조회 (prdCmtSn → 작성자·판매자·타입) -->
+    <select id="findInquiryReportTarget" resultType="nct.product.dto.InquiryReportTarget">
+        SELECT c.PRD_CMT_SN       AS prdCmtSn,
+               c.PRD_SN           AS prdSn,
+               c.USR_SN           AS writerUsrSn,
+               p.USR_SN           AS sellerUsrSn,
+               c.PRD_CMT_TYPE_CD  AS prdCmtTypeCd
+          FROM PRODUCT_COMMENT c
+          JOIN PRODUCT p ON p.PRD_SN = c.PRD_SN
+         WHERE c.PRD_CMT_SN = #{prdCmtSn}
+    </select>
+
+    <!-- 문의 단건 조회 (답변 등록 전 소유권 확인용) -->
+    <select id="findInquiryById" resultType="nct.product.domain.ProductComment">
+        SELECT PRD_CMT_SN       AS prdCmtSn,
+               PRD_SN           AS prdSn,
+               USR_SN           AS usrSn,
+               PRD_CMT_TYPE_CD  AS prdCmtTypeCd,
+               PRD_CMT_PARENT_SN AS prdCmtParentSn,
+               PRD_CMT_CN       AS prdCmtCn
+          FROM PRODUCT_COMMENT
+         WHERE PRD_CMT_SN = #{inquirySn}
+           AND PRD_CMT_TYPE_CD = 'PRDC0006'
+    </select>
+
+    <!-- 특정 문의(PRDC0006)에 이미 등록된 답변(PRDC0007) 조회 — 1문의 1답변 제한·수정 가능 시간 판단용 -->
+    <select id="findReplyByParentSn" resultType="nct.product.domain.ProductComment">
+        SELECT PRD_CMT_SN        AS prdCmtSn,
+               PRD_SN            AS prdSn,
+               USR_SN            AS usrSn,
+               PRD_CMT_TYPE_CD   AS prdCmtTypeCd,
+               PRD_CMT_PARENT_SN AS prdCmtParentSn,
+               PRD_CMT_CN        AS prdCmtCn,
+               PRD_CMT_REG_DT    AS prdCmtRegDt
+          FROM PRODUCT_COMMENT
+         WHERE PRD_CMT_PARENT_SN = #{prdCmtParentSn}
+           AND PRD_CMT_TYPE_CD = 'PRDC0007'
+    </select>
+
+    <!-- 답변 수정 (등록 후 10분 이내 — 서비스 계층에서 시간 검증) -->
+    <update id="updateReply">
+        UPDATE PRODUCT_COMMENT
+           SET PRD_CMT_CN      = #{prdCmtCn},
+               PRD_CMT_UPDT_ID = #{prdCmtUpdtId}
+         WHERE PRD_CMT_SN = #{prdCmtSn}
+           AND PRD_CMT_TYPE_CD = 'PRDC0007'
+    </update>
+
+    <!-- 문의 수정 — 답변(PRDC0007)이 없을 때만 UPDATE (동시성 보호) -->
+    <update id="updateInquiry">
+        UPDATE PRODUCT_COMMENT
+           SET PRD_CMT_CN      = #{prdCmtCn},
+               PRD_CMT_UPDT_ID = #{prdCmtUpdtId}
+         WHERE PRD_CMT_SN      = #{prdCmtSn}
+           AND PRD_CMT_TYPE_CD = 'PRDC0006'
+           AND NOT EXISTS (
+               SELECT 1 FROM (
+                   SELECT PRD_CMT_SN FROM PRODUCT_COMMENT
+                    WHERE PRD_CMT_PARENT_SN = #{prdCmtSn}
+                      AND PRD_CMT_TYPE_CD = 'PRDC0007'
+               ) r
+           )
+    </update>
+
+    <!-- 쿨타임 체크 — usrSn+prdSn 기준 가장 최근 문의(PRDC0006) 등록 시각 -->
+    <select id="findLastInquiryTime" resultType="java.time.LocalDateTime">
+        SELECT PRD_CMT_REG_DT
+          FROM PRODUCT_COMMENT
+         WHERE USR_SN           = #{usrSn}
+           AND PRD_SN           = #{prdSn}
+           AND PRD_CMT_TYPE_CD  = 'PRDC0006'
+         ORDER BY PRD_CMT_REG_DT DESC
+         LIMIT 1
+    </select>
+
+    <!-- 백종남(6) 알림 클릭 이동용 — prdCmtSn → prdSn -->
+    <select id="findProductSnByInquirySn" resultType="java.lang.Long">
+        SELECT PRD_SN
+          FROM PRODUCT_COMMENT
+         WHERE PRD_CMT_SN      = #{prdCmtSn}
+           AND PRD_CMT_TYPE_CD = 'PRDC0006'
+    </select>
+
+</mapper>

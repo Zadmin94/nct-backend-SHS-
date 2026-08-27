@@ -1,0 +1,29 @@
+package nct.trade.dto;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
+import lombok.Data;
+
+/** 거래내역 화면 한 행에 필요한 조회 전용 데이터다. */
+@Data
+public class TradeListItem {
+
+    private Long tradeId;
+    private Long auctionId;
+    @JsonIgnore
+    private Long productId;
+    private String userRole;
+    private String productName;
+    private String productImageUrl;
+    private String counterpartNickname;
+    private BigDecimal tradeAmount;
+    private LocalDateTime createdAt;
+    private LocalDateTime completedAt;
+    private String tradeStatus;
+    private String tradeMethod;
+    private LocalDateTime meetingDateTime;
+    private String meetingPlace;
+}

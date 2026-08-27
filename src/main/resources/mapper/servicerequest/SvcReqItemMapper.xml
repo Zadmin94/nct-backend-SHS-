@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="nct.servicerequest.mapper.SvcReqItemMapper">
+
+    <!-- 요청 항목 전체 삭제 — 수정 시 재삽입 전 호출 -->
+    <delete id="deleteBySvcReqSn">
+        /* SvcReqItemMapper.deleteBySvcReqSn */
+        DELETE FROM SVC_REQ_ITEM WHERE SVC_REQ_SN = #{svcReqSn}
+    </delete>
+
+    <!-- 공개 상세는 공개 허용된 구조화 스냅샷만 반환한다. -->
+    <select id="findPublicItemContentsBySvcReqSn" resultType="java.lang.String">
+        /* SvcReqItemMapper.findPublicItemContentsBySvcReqSn */
+        SELECT SVC_REQ_ITM_CN
+          FROM SVC_REQ_ITEM
+         WHERE SVC_REQ_SN = #{svcReqSn}
+           AND SVC_REQ_ITM_STRUCT_YN = 'Y'
+           AND SVC_REQ_ITM_PUBLIC_YN = 'Y'
+         ORDER BY SVC_REQ_ITM_SORT_NO ASC
+    </select>
+
+    <!-- 요청자 수정 화면은 기존 문자열을 포함한 전체 표시 스냅샷을 사용한다. -->
+    <select id="findAllItemContentsBySvcReqSn" resultType="java.lang.String">
+        /* SvcReqItemMapper.findAllItemContentsBySvcReqSn */
+        SELECT SVC_REQ_ITM_CN
+          FROM SVC_REQ_ITEM
+         WHERE SVC_REQ_SN = #{svcReqSn}
+         ORDER BY SVC_REQ_ITM_SORT_NO ASC
+    </select>
+
+    <select id="findStructuredAnswersBySvcReqSn"
+            resultType="nct.servicerequest.dto.ServiceRequestStoredAnswer">
+        /* SvcReqItemMapper.findStructuredAnswersBySvcReqSn */
+        SELECT S.SVC_REQ_STEP_KEY AS stepKey,
+               F.SVC_REQ_FIELD_KEY AS fieldKey,
+               SO.SVC_REQ_STEP_OPT_VAL AS stepOptionValue,
+               SO.SVC_REQ_STEP_OPT_LABEL AS stepOptionLabel,
+               FO.SVC_REQ_FIELD_OPT_VAL AS fieldOptionValue,
+               FO.SVC_REQ_FIELD_OPT_LABEL AS fieldOptionLabel,
+               I.SVC_REQ_ITM_VAL_CN AS value,
+               I.SVC_REQ_ITM_VAL_ENC AS encryptedValue,
+               I.SVC_REQ_ITM_CN AS snapshot
+          FROM SVC_REQ_ITEM I
+          JOIN SVC_REQ_STEP_DEF S
+            ON S.SVC_REQ_FORM_TMPL_SN = I.SVC_REQ_FORM_TMPL_SN
+           AND S.SVC_REQ_STEP_SN = I.SVC_REQ_STEP_SN
+          LEFT JOIN SVC_REQ_FIELD_DEF F
+            ON F.SVC_REQ_FORM_TMPL_SN = I.SVC_REQ_FORM_TMPL_SN
+           AND F.SVC_REQ_FIELD_SN = I.SVC_REQ_FIELD_SN
+          LEFT JOIN SVC_REQ_STEP_OPT_DEF SO
+            ON SO.SVC_REQ_FORM_TMPL_SN = I.SVC_REQ_FORM_TMPL_SN
+           AND SO.SVC_REQ_STEP_OPT_SN = I.SVC_REQ_STEP_OPT_SN
+          LEFT JOIN SVC_REQ_FIELD_OPT_DEF FO
+            ON FO.SVC_REQ_FORM_TMPL_SN = I.SVC_REQ_FORM_TMPL_SN
+           AND FO.SVC_REQ_FIELD_OPT_SN = I.SVC_REQ_FIELD_OPT_SN
+         WHERE I.SVC_REQ_SN = #{svcReqSn}
+           AND I.SVC_REQ_ITM_STRUCT_YN = 'Y'
+         ORDER BY I.SVC_REQ_ITM_SORT_NO ASC
+    </select>
+
+    <!-- 재등록(마감된 요청서 복사) 전용 — insertAll에 그대로 넘길 전체 컬럼 조회, PK·SVC_REQ_SN은 호출측에서 새 값으로 교체 -->
+    <select id="findItemEntitiesBySvcReqSn" resultType="nct.servicerequest.domain.SvcReqItem">
+        /* SvcReqItemMapper.findItemEntitiesBySvcReqSn */
+        SELECT SVC_REQ_SN            AS svcReqSn,
+               SVC_REQ_FORM_TMPL_SN  AS formTemplateSn,
+               SVC_REQ_STEP_SN       AS stepSn,
+               SVC_REQ_FIELD_SN      AS fieldSn,
+               SVC_REQ_STEP_OPT_SN   AS stepOptionSn,
+               SVC_REQ_FIELD_OPT_SN  AS fieldOptionSn,
+               SVC_REQ_ITM_CN        AS svcReqItmCn,
+               SVC_REQ_ITM_VAL_CN    AS value,
+               SVC_REQ_ITM_VAL_ENC   AS encryptedValue,
+               SVC_REQ_ITM_STRUCT_YN AS structuredYn,
+               SVC_REQ_ITM_PUBLIC_YN AS publicYn,
+               SVC_REQ_ITM_SORT_NO   AS svcReqItmSortNo
+          FROM SVC_REQ_ITEM
+         WHERE SVC_REQ_SN = #{svcReqSn}
+         ORDER BY SVC_REQ_ITM_SORT_NO ASC
+    </select>
+
+    <!-- 요청 항목 일괄 추가 -->
+    <insert id="insertAll">
+        /* SvcReqItemMapper.insertAll */
+        INSERT INTO SVC_REQ_ITEM
+            (SVC_REQ_SN, SVC_REQ_FORM_TMPL_SN, SVC_REQ_STEP_SN, SVC_REQ_FIELD_SN,
+             SVC_REQ_STEP_OPT_SN, SVC_REQ_FIELD_OPT_SN, SVC_REQ_ITM_CN,
+             SVC_REQ_ITM_VAL_CN, SVC_REQ_ITM_VAL_ENC, SVC_REQ_ITM_STRUCT_YN,
+             SVC_REQ_ITM_PUBLIC_YN, SVC_REQ_ITM_SORT_NO)
+        VALUES
+        <foreach collection="items" item="it" separator=",">
+            (#{it.svcReqSn}, #{it.formTemplateSn}, #{it.stepSn}, #{it.fieldSn},
+             #{it.stepOptionSn}, #{it.fieldOptionSn}, #{it.svcReqItmCn},
+             #{it.value}, #{it.encryptedValue}, COALESCE(#{it.structuredYn}, 'N'),
+             COALESCE(#{it.publicYn}, 'N'), #{it.svcReqItmSortNo})
+        </foreach>
+    </insert>
+
+</mapper>
