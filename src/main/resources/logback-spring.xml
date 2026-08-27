@@ -65,6 +65,7 @@
 	-->
 	<logger name="jdbc.sqltiming" level="INFO" additivity="false">
 		<appender-ref ref="QSTDOUT" />
+		<appender-ref ref="ROLLING_FILE" />
 	</logger>
 	<logger name="jdbc.connection" level="OFF" additivity="false">
 		<appender-ref ref="STDOUT" />
